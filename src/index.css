@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app: #f8f9fa;
+  --bg-card: #ffffff;
+  --bg-sidebar: #111827;
+  --sidebar-text: #9ca3af;
+  --sidebar-active: #ffffff;
+  --sidebar-active-bg: #1f2937;
+  --accent: #16a34a;
+  --accent-light: #dcfce7;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border: #e5e7eb;
+  --border-light: #f3f4f6;
+  --red: #dc2626;
+  --red-light: #fef2f2;
+  --yellow: #d97706;
+  --yellow-light: #fffbeb;
+  --blue: #2563eb;
+  --blue-light: #eff6ff;
+  --paid: #16a34a;
+  --paid-bg: #dcfce7;
+  --pending: #d97706;
+  --pending-bg: #fffbeb;
+  --refunded: #dc2626;
+  --refunded-bg: #fef2f2;
+  --cancelled: #6b7280;
+  --cancelled-bg: #f3f4f6;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply font-sans;
+    background: var(--bg-app);
+    color: var(--text-primary);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[10px] border bg-white;
+    border-color: var(--border);
+    background: var(--bg-card);
+  }
+
+  .table-header {
+    @apply text-[11px] font-medium uppercase tracking-wide;
+    color: var(--text-secondary);
+    background: var(--bg-app);
+  }
+
+  .badge-paid {
+    @apply rounded px-2.5 py-0.5 text-xs font-medium;
+    color: var(--paid);
+    background: var(--paid-bg);
+  }
+
+  .badge-pending {
+    @apply rounded px-2.5 py-0.5 text-xs font-medium;
+    color: var(--pending);
+    background: var(--pending-bg);
+  }
+
+  .badge-app {
+    @apply rounded px-2.5 py-0.5 text-xs font-medium;
+    color: var(--blue);
+    background: var(--blue-light);
+  }
+
+  .badge-website {
+    @apply rounded px-2.5 py-0.5 text-xs font-medium;
+    color: var(--cancelled);
+    background: var(--cancelled-bg);
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+}
