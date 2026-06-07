@@ -22,6 +22,18 @@ npm run dev
 - Daily: http://localhost:5173/
 - Full: http://localhost:5173/full
 
+## Deploying to Vercel
+
+The frontend is static; **API routes live in `/api`** as Vercel serverless functions (they call Shopify using env vars).
+
+1. Push to GitHub and connect the repo in Vercel
+2. In **Project → Settings → Environment Variables**, add:
+   - `SHOPIFY_ACCESS_TOKEN` — Admin API token (`read_orders`, `read_customers`, `read_products`)
+   - `SHOPIFY_SHOP_DOMAIN` — e.g. `your-store.myshopify.com`
+3. Deploy — `vercel.json` builds the Vite app and serves `/api/sync/*` endpoints
+
+After deploy, verify: `https://your-app.vercel.app/api/health` should return `{ "ok": true, "configured": true }`.
+
 ## Data & caching
 
 Uses **Shopify Admin REST API** (not MCP — hosted MCP only works inside Cursor).

@@ -10,8 +10,6 @@ import {
   fetchAllCustomers,
   fetchCustomerCount,
   fetchAllProducts,
-  fetchOrdersPage,
-  fetchProductsPage,
   isConfigured,
 } from './shopify.js'
 import {
@@ -22,20 +20,14 @@ import {
   getCacheMeta,
 } from './cache.js'
 import { mergeDashboardData } from './enrich.js'
-import { trimDashboardForClient, trimOrder, trimProduct } from './trim.js'
+import { trimDashboardForClient } from './trim.js'
+import {
+  handleHealth,
+  handleSyncCustomerCount,
+  handleSyncOrders,
+  handleSyncProducts,
+} from './syncApi.js'
 
-function validateShopifyPageUrl(url) {
-  const shop = process.env.SHOPIFY_SHOP_DOMAIN?.trim()
-  if (!shop || !url) return null
-  try {
-    const parsed = new URL(url)
-    if (parsed.hostname !== shop) return null
-    if (!parsed.pathname.includes('/admin/api/')) return null
-    return url
-  } catch {
-    return null
-  }
-}
 const __dirname = dirname(fileURLToPath(import.meta.url))
 config({ path: join(__dirname, '.env') })
 
@@ -227,76 +219,28 @@ async function getData(syncMode = null) {
 loadMemoryFromDisk()
 
 app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    configured: isConfigured(),
-    shop: process.env.SHOPIFY_SHOP_DOMAIN ?? null,
+  const result = handleHealth({
     cached: !!memoryCache,
     fetchedAt: memoryFetchedAt,
     syncMeta: memorySyncMeta ?? getCacheMeta(),
     backgroundRefresh: !!backgroundRefresh,
   })
+  res.status(result.status).json(result.body)
 })
 
 app.get('/api/sync/customer-count', async (_req, res) => {
-  try {
-    if (!isConfigured()) {
-      return res.status(503).json({ success: false, error: 'Shopify credentials missing' })
-    }
-    const count = await fetchCustomerCount()
-    res.json({ success: true, count })
-  } catch (err) {
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) })
-  }
+  const result = await handleSyncCustomerCount()
+  res.status(result.status).json(result.body)
 })
 
 app.get('/api/sync/orders', async (req, res) => {
-  try {
-    if (!isConfigured()) {
-      return res.status(503).json({ success: false, error: 'Shopify credentials missing' })
-    }
-    const since = String(req.query.since ?? '2020-01-01T00:00:00Z')
-    const cursor = req.query.cursor ? validateShopifyPageUrl(String(req.query.cursor)) : null
-    if (req.query.cursor && !cursor) {
-      return res.status(400).json({ success: false, error: 'Invalid pagination cursor' })
-    }
-    const { orders, nextPageUrl } = await fetchOrdersPage(since, cursor)
-    res.json({
-      success: true,
-      orders: orders.map((o) => trimOrder(o)),
-      pageInfo: {
-        hasNextPage: !!nextPageUrl,
-        nextPageUrl,
-      },
-    })
-  } catch (err) {
-    console.error('Incremental orders sync error:', err)
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) })
-  }
+  const result = await handleSyncOrders(req.query)
+  res.status(result.status).json(result.body)
 })
 
 app.get('/api/sync/products', async (req, res) => {
-  try {
-    if (!isConfigured()) {
-      return res.status(503).json({ success: false, error: 'Shopify credentials missing' })
-    }
-    const cursor = req.query.cursor ? validateShopifyPageUrl(String(req.query.cursor)) : null
-    if (req.query.cursor && !cursor) {
-      return res.status(400).json({ success: false, error: 'Invalid pagination cursor' })
-    }
-    const { products, nextPageUrl } = await fetchProductsPage(cursor)
-    res.json({
-      success: true,
-      products: products.map((p) => trimProduct(p)),
-      pageInfo: {
-        hasNextPage: !!nextPageUrl,
-        nextPageUrl,
-      },
-    })
-  } catch (err) {
-    console.error('Products sync error:', err)
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) })
-  }
+  const result = await handleSyncProducts(req.query)
+  res.status(result.status).json(result.body)
 })
 
 app.get('/api/data', async (req, res) => {
