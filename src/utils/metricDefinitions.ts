@@ -168,9 +168,15 @@ export const METRIC_DEFINITIONS: Record<string, MetricDefinition> = {
     formula: 'Orders grouped by IST month',
     exclusions: 'None',
   },
+  retentionGrid: {
+    title: 'Cohort retention matrix',
+    definition: 'Share of each acquisition-month cohort that placed another order in subsequent months',
+    formula: 'Retained customers in month M+n ÷ cohort size at M0',
+    exclusions: 'Customers without a linked profile; based on orders in loaded range',
+  },
   powerUsers: {
     title: 'Power users',
-    definition: 'Customers with the highest order counts and spend',
+    definition: 'Customers with ≥5 orders or ≥₹10,000 spend in the rolling 12-week window',
     formula: 'Sorted by orders_count and total_spent',
     exclusions: 'Test users if hidden',
   },

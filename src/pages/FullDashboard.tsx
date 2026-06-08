@@ -27,6 +27,19 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
+const LEGACY_FILTERS = {
+  dateMode: 'preset' as const,
+  dateRange: '30d' as FullDateRange,
+  customFrom: null,
+  customTo: null,
+  compareCustomFrom: null,
+  compareCustomTo: null,
+  orderStatuses: ['all' as const],
+  compareEnabled: false,
+  compareMode: null,
+  hideTestUsers: false,
+}
+
 export default function FullDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('summary')
   const [dateRange, setDateRange] = useState<FullDateRange>('30d')
@@ -111,7 +124,7 @@ export default function FullDashboard() {
               syncMeta={syncMeta}
               onSyncOrders={syncOrders}
               onSyncProducts={syncProducts}
-              onSyncAll={syncAll}
+              onSyncAll={() => void syncAll('summary', LEGACY_FILTERS)}
             />
           </div>
         </header>

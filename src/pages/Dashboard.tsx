@@ -17,10 +17,11 @@ import { ProductsTab } from '../components/full/Products'
 import { GeographyTab } from '../components/full/Geography'
 import { ChannelTab } from '../components/full/Channel'
 import { GrowthTab } from '../components/full/Growth'
+import { RetentionTab } from '../components/full/Retention'
 import { CohortBuilder } from '../components/cohorts/CohortBuilder'
 import { SyncMenu } from '../components/shared/SyncMenu'
 import { SyncStatusLabel } from '../components/shared/SyncStatusLabel'
-import { GlobalFilterBar } from '../components/shared/GlobalFilterBar'
+import { DateFilterBar, AdvancedFilterBar } from '../components/shared/DateFilterBar'
 import { LoadingBar } from '../components/shared/LoadingBar'
 import { DrillDownDrawer } from '../components/drilldown/DrillDownDrawer'
 import { OrderDetailModal } from '../components/drilldown/OrderDetailModal'
@@ -36,14 +37,14 @@ import {
 import { formatTodayHeader, formatTimeIST } from '../utils/dates'
 import { filterTestOrders } from '../utils/testUserFilter'
 import type { SyncStatus } from '../sync/syncEngine'
-
-const REFRESH_MS = 5 * 60 * 1000
+import type { DashboardSection } from '../utils/rangeParams'
 
 const NAV_ITEMS: { id: SectionId; label: string; section?: 'analytics' | 'tools' }[] = [
   { id: 'today', label: 'Today', section: 'analytics' },
   { id: 'summary', label: 'Summary', section: 'analytics' },
   { id: 'orders', label: 'Orders', section: 'analytics' },
   { id: 'users', label: 'Users', section: 'analytics' },
+  { id: 'retention', label: 'Retention', section: 'analytics' },
   { id: 'geography', label: 'Geography', section: 'analytics' },
   { id: 'channel', label: 'Channel', section: 'analytics' },
   { id: 'growth', label: 'Growth', section: 'analytics' },
@@ -51,23 +52,13 @@ const NAV_ITEMS: { id: SectionId; label: string; section?: 'analytics' | 'tools'
   { id: 'products', label: 'Products', section: 'tools' },
 ]
 
-type SectionId =
-  | 'today'
-  | 'summary'
-  | 'orders'
-  | 'users'
-  | 'cohorts'
-  | 'products'
-  | 'geography'
-  | 'channel'
-  | 'growth'
+type SectionId = DashboardSection
 
 function syncStatusTextFromStatus(status: SyncStatus, orderCount: number): string | null {
-  if (status.state === 'loading-cache') return 'Loading from cache…'
-  if (status.state === 'syncing') return `Syncing ${status.fetched} new orders…`
+  if (status.state === 'syncing') return `Loading ${status.label ?? 'orders'}…`
   if (status.state === 'done') {
-    return `${status.ordersInDB.toLocaleString('en-IN')} orders${
-      status.newOrdersFetched > 0 ? ` · ${status.newOrdersFetched} new` : ' · Up to date'
+    return `${status.label ?? 'Range'}: ${status.ordersInDB.toLocaleString('en-IN')} orders${
+      status.fromCache ? ' (cached)' : ''
     }`
   }
   if (status.state === 'error' && status.cachedOrdersAvailable > 0) {
@@ -99,15 +90,14 @@ function DashboardShell({
   syncWarning,
   syncStatus,
   lastFetched,
-  softRefresh,
-  syncOrders,
+  loadForPage,
+  refreshPage,
   syncProducts,
   syncAll,
   retrySync,
 }: ReturnType<typeof useAppData>) {
   const [activeSection, setActiveSection] = useState<SectionId>('today')
   const [visitedSections, setVisitedSections] = useState<Set<SectionId>>(() => new Set(['today']))
-  const [countdown, setCountdown] = useState(REFRESH_MS)
   const [debugOpen, setDebugOpen] = useState(false)
   const {
     filteredOrders,
@@ -149,10 +139,25 @@ function DashboardShell({
     orderStatus: filters.orderStatuses.includes('all') ? ('all' as const) : filters.orderStatuses[0] ?? 'all',
   }
 
-  const doRefresh = useCallback(async () => {
-    await softRefresh()
-    setCountdown(REFRESH_MS)
-  }, [softRefresh])
+  const doRefresh = useCallback(() => {
+    void refreshPage(activeSection, filters)
+  }, [refreshPage, activeSection, filters])
+
+  // Load data when tab or date filter changes (cache-aware — skips API if fresh).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadForPage(activeSection, filters)
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [
+    activeSection,
+    filters.dateRange,
+    filters.dateMode,
+    filters.customFrom,
+    filters.customTo,
+    loadForPage,
+    filters,
+  ])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -168,8 +173,6 @@ function DashboardShell({
         setDebugOpen((v) => !v)
         return
       }
-      if (e.key.toLowerCase() === 'r') doRefresh()
-      if (e.key.toLowerCase() === 't') setDateRange('today')
       if (e.key === 'Escape') {
         closeDrillDown()
         closeOrderDetail()
@@ -178,23 +181,8 @@ function DashboardShell({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [doRefresh, setDateRange, closeDrillDown, closeOrderDetail])
+  }, [setDateRange, closeDrillDown, closeOrderDetail])
 
-  useEffect(() => {
-    if (activeSection !== 'today') return
-    const tick = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1000) {
-          doRefresh()
-          return REFRESH_MS
-        }
-        return c - 1000
-      })
-    }, 1000)
-    return () => clearInterval(tick)
-  }, [doRefresh, activeSection])
-
-  const countdownLabel = `${Math.floor(countdown / 60000)}:${String(Math.floor((countdown % 60000) / 1000)).padStart(2, '0')}`
   const totalOrdersLoaded = orders.length
   const pageTitle = NAV_ITEMS.find((s) => s.id === activeSection)?.label ?? 'Dashboard'
 
@@ -289,28 +277,27 @@ function DashboardShell({
             {activeSection === 'today' ? `Today, ${formatTodayHeader()}` : pageTitle}
           </h2>
           <div className="flex-1" />
-          <SyncStatusLabel status={syncStatus} onRetry={() => void retrySync()} />
-          {activeSection === 'today' && !isRefreshing && (
-            <span className="text-xs text-[var(--text-tertiary)]">Refreshes in {countdownLabel}</span>
-          )}
+          <SyncStatusLabel status={syncStatus} onRetry={() => void retrySync(activeSection, filters)} />
           <span className={`inline-block h-2 w-2 rounded-full ${syncDotColor}`} title="Sync status" />
           <button
             type="button"
             onClick={doRefresh}
             className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-app)]"
+            title="Reload current page for selected date range"
           >
             Refresh
           </button>
           <SyncMenu
             isRefreshing={isRefreshing}
             lastSyncedAt={lastFetched}
-            onSyncOrders={syncOrders}
+            onSyncOrders={() => refreshPage(activeSection, filters)}
             onSyncProducts={syncProducts}
-            onSyncAll={syncAll}
+            onSyncAll={() => syncAll(activeSection, filters)}
           />
         </header>
 
-        <GlobalFilterBar />
+        <DateFilterBar />
+        <AdvancedFilterBar />
 
         {syncWarning && orders.length > 0 && (
           <div className="border-b border-[var(--yellow)] bg-[var(--yellow-light)] px-6 py-2.5 text-sm text-[var(--yellow)]">
@@ -320,7 +307,7 @@ function DashboardShell({
             </span>
             <button
               type="button"
-              onClick={() => void retrySync()}
+              onClick={() => void retrySync(activeSection, filters)}
               className="ml-3 font-medium underline hover:no-underline"
             >
               Retry
@@ -333,7 +320,7 @@ function DashboardShell({
             <span className="font-medium">{error}</span>
             <button
               type="button"
-              onClick={() => void retrySync()}
+              onClick={() => void retrySync(activeSection, filters)}
               className="ml-3 font-medium underline hover:no-underline"
             >
               Retry
@@ -342,8 +329,14 @@ function DashboardShell({
         )}
 
         <main className="flex-1 space-y-6 p-6">
-          {isLoading && orders.length === 0 ? (
+          {isLoading && orders.length === 0 && activeSection !== 'products' ? (
             <PageSkeleton />
+          ) : orders.length === 0 && activeSection !== 'products' && syncStatus.state !== 'syncing' ? (
+            <div className="rounded-[10px] border border-[var(--border)] bg-white px-6 py-12 text-center">
+              <p className="text-sm text-[var(--text-secondary)]">
+                Select a date range above, or click Refresh to load orders.
+              </p>
+            </div>
           ) : (
             <ErrorBoundary>
               {visitedSections.has('today') && activeSection === 'today' && (
@@ -372,6 +365,9 @@ function DashboardShell({
               {visitedSections.has('summary') && activeSection === 'summary' && <SummaryTab {...tabProps} />}
               {visitedSections.has('orders') && activeSection === 'orders' && <OrdersTab {...tabProps} />}
               {visitedSections.has('users') && activeSection === 'users' && <UsersTab {...tabProps} />}
+              {visitedSections.has('retention') && activeSection === 'retention' && (
+                <RetentionTab orders={filteredOrders} productTagsMap={productTagsMap} />
+              )}
               {visitedSections.has('cohorts') && activeSection === 'cohorts' && <CohortBuilder />}
               {visitedSections.has('products') && activeSection === 'products' && <ProductsTab {...tabProps} />}
               {visitedSections.has('geography') && activeSection === 'geography' && <GeographyTab {...tabProps} />}

@@ -15,6 +15,7 @@ import type {
 } from '../api/types'
 import { parseMoney } from './formatters'
 import { filterOrdersByPeriod } from './dates'
+import { buildCustomerSummaries, computeRepeatRate } from './customerSummary'
 
 const ORDER_VALUE_BUCKETS = [
   { label: 'Under ₹200', min: 0, max: 199 },
@@ -163,18 +164,33 @@ function monthKey(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function computeKPIs(orders: Order[], customers: Customer[], customerCount: number): KPIs {
+export function computeKPIs(
+  orders: Order[],
+  customers: Customer[],
+  customerCount: number,
+  productTagsMap?: import('../api/types').ProductTagsMap
+): KPIs {
   const grossRevenue = orders.reduce((s, o) => s + parseMoney(o.total_price), 0)
   const totalOrders = orders.length
-  const repeatCustomers = customers.filter((c) => c.orders_count > 1).length
-  const totalCustomers = customerCount || customers.length
+
+  let repeatCustomerRate = 0
+  let totalCustomers = customerCount || customers.length
+
+  if (productTagsMap && orders.length > 0) {
+    const summaries = buildCustomerSummaries(orders, productTagsMap)
+    totalCustomers = summaries.length
+    repeatCustomerRate = computeRepeatRate(summaries)
+  } else {
+    const repeatCustomers = customers.filter((c) => c.orders_count > 1).length
+    repeatCustomerRate = totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0
+  }
 
   return {
     totalOrders,
     grossRevenue,
     averageOrderValue: totalOrders > 0 ? grossRevenue / totalOrders : 0,
     totalCustomers,
-    repeatCustomerRate: totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0,
+    repeatCustomerRate,
     avgItemsPerOrder: computeAvgItemsPerOrder(orders),
   }
 }

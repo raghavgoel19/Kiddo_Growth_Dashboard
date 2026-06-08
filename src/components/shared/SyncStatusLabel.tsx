@@ -16,23 +16,25 @@ export function SyncStatusLabel({ status, onRetry }: SyncStatusLabelProps) {
   if (status.state === 'syncing') {
     return (
       <span className="text-xs text-[var(--text-tertiary)]">
-        ⟳ Syncing {status.fetched.toLocaleString('en-IN')} new orders…
+        ⟳ Loading {status.label ?? 'orders'}… {status.fetched > 0 ? `(${status.fetched})` : ''}
       </span>
     )
   }
 
   if (status.state === 'done') {
+    const cacheNote = status.fromCache ? ' · cached' : ''
     if (status.newOrdersFetched > 0) {
       return (
         <span className="text-xs text-[var(--text-tertiary)]">
-          ✓ {status.ordersInDB.toLocaleString('en-IN')} orders · {status.newOrdersFetched} new · Synced{' '}
+          ✓ {status.label ?? 'Range'}: {status.ordersInDB.toLocaleString('en-IN')} orders
+          {cacheNote || ` · fetched ${status.newOrdersFetched}`} ·{' '}
           {formatDistanceToNow(status.syncedAt, { addSuffix: true })}
         </span>
       )
     }
     return (
       <span className="text-xs text-[var(--text-tertiary)]">
-        ✓ {status.ordersInDB.toLocaleString('en-IN')} orders · Up to date
+        ✓ {status.label ?? 'Range'}: {status.ordersInDB.toLocaleString('en-IN')} orders{cacheNote} · Up to date
       </span>
     )
   }
@@ -41,7 +43,7 @@ export function SyncStatusLabel({ status, onRetry }: SyncStatusLabelProps) {
     if (status.cachedOrdersAvailable > 0) {
       return (
         <span className="text-xs text-[var(--yellow)]">
-          ⚠ Showing {status.cachedOrdersAvailable.toLocaleString('en-IN')} cached orders · Sync failed{' '}
+          ⚠ Showing {status.cachedOrdersAvailable.toLocaleString('en-IN')} cached orders · Load failed{' '}
           {onRetry ? (
             <button type="button" onClick={onRetry} className="font-medium underline hover:no-underline">
               Retry
@@ -50,7 +52,7 @@ export function SyncStatusLabel({ status, onRetry }: SyncStatusLabelProps) {
         </span>
       )
     }
-    return <span className="text-xs text-[var(--red)]">Sync failed: {status.message}</span>
+    return <span className="text-xs text-[var(--red)]">Load failed: {status.message}</span>
   }
 
   return null

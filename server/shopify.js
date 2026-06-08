@@ -57,11 +57,11 @@ export async function fetchAllOrders() {
   return paginate(url, token, 'orders')
 }
 
-export async function fetchOrdersPage(createdAtMin, nextUrl = null) {
+export async function fetchOrdersPage(createdAtMin, createdAtMax, nextUrl = null) {
   const { token, base } = getConfig()
   const url =
     nextUrl ??
-    `${base}/orders.json?status=any&limit=250&order=created_at+asc&created_at_min=${encodeURIComponent(createdAtMin)}`
+    `${base}/orders.json?status=any&limit=250&order=created_at+asc&created_at_min=${encodeURIComponent(createdAtMin)}&created_at_max=${encodeURIComponent(createdAtMax)}`
   const res = await shopifyFetch(url, token)
   const data = await res.json()
   return {

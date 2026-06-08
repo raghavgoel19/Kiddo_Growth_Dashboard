@@ -7,7 +7,7 @@ Multi-tab analytics for [allforkiddo.com](https://allforkiddo.com) — kids quic
 | Route | Dashboard |
 |---|---|
 | `/` | **Daily pulse** — today's KPIs vs yesterday & same day last week |
-| `/full` | **Full analytics** — 7 tabs (Summary, Orders, Users, Products, Geography, Channel, Growth) |
+| `/full` | **Full analytics** — Summary, Orders, Users, Retention, Geography, Channel, Growth, Cohorts, Products |
 
 ## Setup
 
@@ -30,6 +30,8 @@ The frontend is static; **API routes live in `/api`** as Vercel serverless funct
 2. In **Project → Settings → Environment Variables**, add:
    - `SHOPIFY_ACCESS_TOKEN` — Admin API token (`read_orders`, `read_customers`, `read_products`)
    - `SHOPIFY_SHOP_DOMAIN` — e.g. `your-store.myshopify.com`
+
+   No `VITE_*` tokens are required — Shopify credentials stay server-side in `/api/sync/*` routes only. The app uses **Shopify REST**, not MCP (MCP is Cursor-only).
 3. Deploy — `vercel.json` builds the Vite app and serves `/api/sync/*` endpoints
 
 After deploy, verify: `https://your-app.vercel.app/api/health` should return `{ "ok": true, "configured": true }`.

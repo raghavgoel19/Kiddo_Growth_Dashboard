@@ -7,11 +7,7 @@ import { formatCustomRangeLabel } from '../../utils/dates'
 const DATE_PRESETS: { label: string; value: FullDateRange }[] = [
   { label: 'Today', value: 'today' },
   { label: 'Yesterday', value: 'yesterday' },
-  { label: 'Last 7d', value: '7d' },
-  { label: 'Last 30d', value: '30d' },
-  { label: 'Last 90d', value: '90d' },
-  { label: 'Last 12m', value: '12m' },
-  { label: 'All time', value: 'all' },
+  { label: 'Last week', value: '7d' },
 ]
 
 const STATUS_PILLS: { label: string; value: OrderStatus }[] = [

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { FullDateRange } from '../../api/types'
 import { DeltaBadge } from './DeltaBadge'
 import { InfoTooltipByKey } from './InfoTooltip'
@@ -21,7 +22,7 @@ interface KPICardProps {
   onDateOverrideChange?: (range: FullDateRange | null) => void
 }
 
-export function KPICard({
+export const KPICard = memo(function KPICard({
   label,
   value,
   vsPrevDay,
@@ -79,4 +80,4 @@ export function KPICard({
       </div>
     </div>
   )
-}
+})

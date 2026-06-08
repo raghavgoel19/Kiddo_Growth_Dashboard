@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import {
   BarChart,
   Bar,
@@ -11,9 +11,11 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { Customer, Order, ProductTagsMap } from '../../api/types'
-import { computeCustomerCohort, computeKPIs, customersToPowerUsers } from '../../utils/aggregators'
+import { computeCustomerCohort, computeKPIs, getPowerUserTier } from '../../utils/aggregators'
+import { buildCustomerSummaries } from '../../utils/customerSummary'
 import { formatINR, formatMonthLabel, maskPhone } from '../../utils/formatters'
 import { ExportButton } from '../shared/ExportButton'
+import { VirtualTable } from '../shared/VirtualTable'
 import { downloadCsv, exportFilename } from '../../utils/csv'
 import { InfoTooltipByKey } from '../shared/InfoTooltip'
 import { EmptyState } from '../shared/EmptyState'
@@ -25,43 +27,63 @@ interface TabProps {
   productTagsMap: ProductTagsMap
 }
 
-export function UsersTab({ orders, customers, customerCount }: TabProps) {
+export const UsersTab = memo(function UsersTab({
+  orders,
+  customers,
+  customerCount,
+  productTagsMap,
+}: TabProps) {
   const [search, setSearch] = useState('')
 
-  const filteredOrders = orders
+  const summaries = useMemo(() => buildCustomerSummaries(orders, productTagsMap), [orders, productTagsMap])
 
   const kpis = useMemo(
-    () => computeKPIs(filteredOrders, customers, customerCount),
-    [filteredOrders, customers, customerCount]
+    () => computeKPIs(orders, customers, customerCount, productTagsMap),
+    [orders, customers, customerCount, productTagsMap]
   )
 
   const cohort = useMemo(() => computeCustomerCohort(customers), [customers])
 
   const newCustomersDaily = useMemo(() => {
     const map = new Map<string, number>()
-    for (const c of customers) {
-      const key = c.created_at.slice(0, 10)
+    for (const c of summaries) {
+      const key = c.firstOrderDate.slice(0, 10)
       map.set(key, (map.get(key) ?? 0) + 1)
     }
     return Array.from(map.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-30)
       .map(([date, count]) => ({ date, count }))
-  }, [customers])
+  }, [summaries])
 
-  const oneAndDoneRate =
-    customers.length > 0
-      ? (customers.filter((c) => c.orders_count === 1).length / customers.length) * 100
-      : 0
+  const oneAndDoneRate = useMemo(
+    () =>
+      summaries.length > 0
+        ? (summaries.filter((c) => c.totalOrders === 1).length / summaries.length) * 100
+        : 0,
+    [summaries]
+  )
 
   const powerUsers = useMemo(() => {
-    const users = customersToPowerUsers(customers)
+    const users = summaries
+      .filter((c) => c.totalOrders >= 5 || c.totalSpent >= 10_000)
+      .sort((a, b) => b.totalSpent - a.totalSpent)
+      .map((c, i) => {
+        const { tier, tierEmoji } = getPowerUserTier(c.totalOrders)
+        return {
+          id: c.id,
+          phone: c.phone ?? '',
+          ordersCount: c.totalOrders,
+          totalSpent: c.totalSpent,
+          avgOrderValue: c.aov,
+          tier,
+          tierEmoji,
+          rank: i + 1,
+        }
+      })
     const q = search.replace(/\D/g, '')
-    const filtered = q
-      ? users.filter((u) => u.phone.replace(/\D/g, '').includes(q))
-      : users
-    return filtered.sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 20)
-  }, [customers, search])
+    return (q ? users.filter((u) => u.phone.replace(/\D/g, '').includes(q)) : users).slice(0, 100)
+  }, [summaries, search])
 
   if (orders.length === 0) {
     return <EmptyState message="No orders match the current filters." />
@@ -135,46 +157,39 @@ export function UsersTab({ orders, customers, customerCount }: TabProps) {
                 downloadCsv(
                   exportFilename('power_users'),
                   ['Rank', 'Phone', 'Orders', 'Spent', 'AOV', 'Tier'],
-                  powerUsers.map((u, i) => [
-                    i + 1,
-                    u.phone,
-                    u.ordersCount,
-                    u.totalSpent,
-                    u.avgOrderValue,
-                    u.tier,
-                  ])
+                  powerUsers.map((u) => [u.rank, u.phone, u.ordersCount, u.totalSpent, u.avgOrderValue, u.tier])
                 )
               }
             />
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase text-slate-400">
-                <th className="pb-2 pr-3">#</th>
-                <th className="pb-2 pr-3">Phone</th>
-                <th className="pb-2 pr-3 text-right">Orders</th>
-                <th className="pb-2 pr-3 text-right">Spent</th>
-                <th className="pb-2 pr-3 text-right">AOV</th>
-                <th className="pb-2">Tier</th>
-              </tr>
-            </thead>
-            <tbody>
-              {powerUsers.map((u, i) => (
-                <tr key={u.id} className="border-b border-slate-50">
-                  <td className="py-2 pr-3 text-slate-400">{i + 1}</td>
-                  <td className="py-2 pr-3">{maskPhone(u.phone)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{u.ordersCount}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{formatINR(u.totalSpent)}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{formatINR(u.avgOrderValue)}</td>
-                  <td className="py-2">{u.tierEmoji} {u.tier}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <VirtualTable
+          rows={powerUsers}
+          header={
+            <tr className="border-b text-left text-xs uppercase text-slate-400">
+              <th className="pb-2 pr-3">#</th>
+              <th className="pb-2 pr-3">Phone</th>
+              <th className="pb-2 pr-3 text-right">Orders</th>
+              <th className="pb-2 pr-3 text-right">Spent</th>
+              <th className="pb-2 pr-3 text-right">AOV</th>
+              <th className="pb-2">Tier</th>
+            </tr>
+          }
+          getRowKey={(u) => u.id}
+          renderRow={(u) => (
+            <>
+              <td className="py-2 pr-3 text-slate-400">{u.rank}</td>
+              <td className="py-2 pr-3">{maskPhone(u.phone)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{u.ordersCount}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{formatINR(u.totalSpent)}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{formatINR(u.avgOrderValue)}</td>
+              <td className="py-2">
+                {u.tierEmoji} {u.tier}
+              </td>
+            </>
+          )}
+        />
       </div>
     </div>
   )
-}
+})

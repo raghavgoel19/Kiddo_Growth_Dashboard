@@ -32,7 +32,7 @@ export function CommandPalette({ orders, onSelectOrder, onNavigate }: CommandPal
     const phoneMatches = orders
       .filter((o) => o.customer?.phone?.replace(/\D/g, '').includes(q.replace(/\D/g, '')))
       .slice(0, 5)
-    const sections = ['today', 'summary', 'orders', 'users', 'cohorts', 'products']
+    const sections = ['today', 'summary', 'orders', 'users', 'retention', 'cohorts', 'products']
       .filter((s) => s.includes(q))
       .map((s) => ({ type: 'section' as const, id: s, label: `Go to ${s}` }))
     return [

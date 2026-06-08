@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { Drawer } from '../shared/Drawer'
 import { useDashboardContext } from '../../context/DashboardContext'
 import { ExportButton } from '../shared/ExportButton'
+import { VirtualTable } from '../shared/VirtualTable'
 import { formatINR, formatIST, maskPhone } from '../../utils/formatters'
 import { exportCustomersCsv, exportOrdersCsv } from '../../utils/orderAnalysis'
 
-export function DrillDownDrawer() {
+export const DrillDownDrawer = memo(function DrillDownDrawer() {
   const { drillDown, closeDrillDown, openOrderDetail, allOrders, productTagsMap, filteredCustomers } =
     useDashboardContext()
   const [tab, setTab] = useState<'orders' | 'customers'>('orders')
@@ -71,52 +72,52 @@ export function DrillDownDrawer() {
         </div>
         <div className="flex-1 overflow-auto px-4 pb-4">
           {tab === 'orders' ? (
-            <table className="w-full text-sm">
-              <thead>
+            <VirtualTable
+              rows={filteredOrders}
+              header={
                 <tr className="text-left text-xs uppercase text-slate-400">
                   <th className="pb-2">Order #</th>
                   <th className="pb-2">Date</th>
                   <th className="pb-2">Customer</th>
                   <th className="pb-2 text-right">Total</th>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredOrders.map((o) => (
-                  <tr key={o.id} className="border-t border-slate-100">
-                    <td className="py-2">
-                      <button type="button" className="font-medium text-[#00A86B] hover:underline" onClick={() => openOrderDetail(o)}>
-                        {o.name ?? `#${o.order_number}`}
-                      </button>
-                    </td>
-                    <td className="py-2 text-slate-600">{formatIST(o.created_at)}</td>
-                    <td className="py-2">{maskPhone(o.customer?.phone)}</td>
-                    <td className="py-2 text-right">{formatINR(parseFloat(o.total_price) || 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              }
+              getRowKey={(o) => o.id}
+              renderRow={(o) => (
+                <>
+                  <td className="py-2">
+                    <button type="button" className="font-medium text-[#00A86B] hover:underline" onClick={() => openOrderDetail(o)}>
+                      {o.name ?? `#${o.order_number}`}
+                    </button>
+                  </td>
+                  <td className="py-2 text-slate-600">{formatIST(o.created_at)}</td>
+                  <td className="py-2">{maskPhone(o.customer?.phone)}</td>
+                  <td className="py-2 text-right">{formatINR(parseFloat(o.total_price) || 0)}</td>
+                </>
+              )}
+            />
           ) : (
-            <table className="w-full text-sm">
-              <thead>
+            <VirtualTable
+              rows={filteredCustomersList}
+              header={
                 <tr className="text-left text-xs uppercase text-slate-400">
                   <th className="pb-2">Phone</th>
                   <th className="pb-2 text-right">Orders</th>
                   <th className="pb-2 text-right">Spent</th>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredCustomersList.map((c) => (
-                  <tr key={c.id} className="border-t border-slate-100">
-                    <td className="py-2">{maskPhone(c.phone)}</td>
-                    <td className="py-2 text-right">{c.orders_count}</td>
-                    <td className="py-2 text-right">{formatINR(parseFloat(c.total_spent) || 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              }
+              getRowKey={(c) => c.id}
+              renderRow={(c) => (
+                <>
+                  <td className="py-2">{maskPhone(c.phone)}</td>
+                  <td className="py-2 text-right">{c.orders_count}</td>
+                  <td className="py-2 text-right">{formatINR(parseFloat(c.total_spent) || 0)}</td>
+                </>
+              )}
+            />
           )}
         </div>
       </div>
     </Drawer>
   )
-}
+})

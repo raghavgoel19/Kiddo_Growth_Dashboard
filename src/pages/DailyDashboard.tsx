@@ -18,6 +18,19 @@ import { SyncControls } from '../components/shared/SyncControls'
 
 const REFRESH_MS = 5 * 60 * 1000
 
+const LEGACY_FILTERS = {
+  dateMode: 'preset' as const,
+  dateRange: 'today' as const,
+  customFrom: null,
+  customTo: null,
+  compareCustomFrom: null,
+  compareCustomTo: null,
+  orderStatuses: ['all' as const],
+  compareEnabled: false,
+  compareMode: null,
+  hideTestUsers: false,
+}
+
 export default function DailyDashboard() {
   const {
     orders,
@@ -94,7 +107,7 @@ export default function DailyDashboard() {
                 syncMeta={syncMeta}
                 onSyncOrders={syncOrders}
                 onSyncProducts={syncProducts}
-                onSyncAll={syncAll}
+                onSyncAll={() => void syncAll('today', LEGACY_FILTERS)}
               />
             </div>
           </div>

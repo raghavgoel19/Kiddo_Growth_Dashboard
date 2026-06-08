@@ -49,6 +49,20 @@ function normalizeProduct(product: Product): Product {
   }
 }
 
+export async function replaceOrders(orders: Order[]) {
+  const database = await getDB()
+  const tx = database.transaction('orders', 'readwrite')
+  await tx.store.clear()
+  if (orders.length > 0) {
+    await Promise.all([
+      ...orders.map((order) => tx.store.put(normalizeOrder(order))),
+      tx.done,
+    ])
+  } else {
+    await tx.done
+  }
+}
+
 export async function bulkSaveOrders(orders: Order[]) {
   if (!orders.length) return
   const database = await getDB()

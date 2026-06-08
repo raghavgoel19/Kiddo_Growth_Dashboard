@@ -62,6 +62,9 @@ export function SyncMenu({
             }}
           >
             Sync new orders
+            <span className="mt-0.5 block text-xs text-[var(--text-tertiary)]">
+              Reloads current page & date range
+            </span>
           </button>
           <button
             type="button"

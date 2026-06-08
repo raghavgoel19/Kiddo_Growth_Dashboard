@@ -19,11 +19,15 @@ interface ProductsPageResponse {
   error?: string
 }
 
-export async function fetchOrdersPage(since: string, cursor: string | null): Promise<{
+export async function fetchOrdersPage(
+  since: string,
+  until: string,
+  cursor: string | null
+): Promise<{
   orders: Order[]
   pageInfo: PageInfo
 }> {
-  const params = new URLSearchParams({ since })
+  const params = new URLSearchParams({ since, until })
   if (cursor) params.set('cursor', cursor)
 
   const res = await fetch(`/api/sync/orders?${params}`)

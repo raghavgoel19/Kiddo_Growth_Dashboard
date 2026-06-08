@@ -47,11 +47,12 @@ export async function handleSyncOrders(query = {}) {
   if (!isConfigured()) return notConfigured()
   try {
     const since = String(query.since ?? '2020-01-01T00:00:00Z')
+    const until = String(query.until ?? new Date().toISOString())
     const cursor = query.cursor ? validateShopifyPageUrl(String(query.cursor)) : null
     if (query.cursor && !cursor) {
       return { status: 400, body: { success: false, error: 'Invalid pagination cursor' } }
     }
-    const { orders, nextPageUrl } = await fetchOrdersPage(since, cursor)
+    const { orders, nextPageUrl } = await fetchOrdersPage(since, until, cursor)
     return {
       status: 200,
       body: {
