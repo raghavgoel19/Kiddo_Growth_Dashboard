@@ -11,7 +11,7 @@ import {
   formatIST,
   formatMonthYear,
   guestDisplayName,
-  maskPhone,
+  displayPhone,
   parseMoney,
 } from '../../utils/formatters'
 
@@ -156,7 +156,7 @@ export function OrderDetailModal({ productTagsMap }: OrderDetailModalProps) {
 
           <section>
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">Customer</h3>
-            <p className="mt-2 text-[13px] font-medium">{order.customer?.phone ? maskPhone(order.customer.phone) : guestDisplayName(order)}</p>
+            <p className="mt-2 text-[13px] font-medium">{order.customer?.phone ? displayPhone(order.customer.phone) : guestDisplayName(order)}</p>
             <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
               {ordinal}
               {customerStats?.since ? ` · Customer since ${customerStats.since}` : ''}

@@ -1,18 +1,23 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Order, Product, ProductTagsMap } from '../api/types'
 import { getAllProducts, printSyncBanner } from '../db/orderDB'
 import { buildProductTagsMap } from '../utils/taxonomy'
 import { deriveCustomersFromOrders } from '../sync/customers'
 import { forceSyncProducts, syncProducts } from '../sync/productSync'
-import { fetchOrdersForRange, fullResync, type SyncStatus } from '../sync/syncEngine'
+import {
+  fetchOrdersForRange,
+  fullResync,
+  incrementalRefresh,
+  startupSync,
+  type SyncStatus,
+} from '../sync/syncEngine'
+import type { GlobalFilters } from '../context/DashboardContext'
 import {
   apiRangeForSection,
   sectionNeedsOrders,
   type ApiDateRange,
   type DashboardSection,
 } from '../utils/rangeParams'
-import type { GlobalFilters } from '../context/DashboardContext'
-import { useMemo } from 'react'
 
 export type { SyncStatus }
 
@@ -31,6 +36,7 @@ export function useMasterData() {
   const [loadedRange, setLoadedRange] = useState<ApiDateRange | null>(null)
   const productsLoaded = useRef(false)
   const loadInFlight = useRef<string | null>(null)
+  const startupDone = useRef(false)
 
   const customers = useMemo(() => deriveCustomersFromOrders(orders), [orders])
   const productTagsMap = useMemo<ProductTagsMap>(() => buildProductTagsMap(products), [products])
@@ -70,6 +76,21 @@ export function useMasterData() {
     return synced
   }, [products.length])
 
+  useEffect(() => {
+    if (startupDone.current) return
+    startupDone.current = true
+    void (async () => {
+      await ensureProducts()
+      const loaded = await startupSync(handleSyncStatus, handleOrdersReady)
+      void printSyncBanner(loaded.length, await import('../db/orderDB').then((m) => m.getMeta('lastSyncedAt')))
+    })()
+  }, [ensureProducts, handleOrdersReady, handleSyncStatus])
+
+  const refreshIncremental = useCallback(async () => {
+    await ensureProducts()
+    return incrementalRefresh(handleSyncStatus, handleOrdersReady)
+  }, [ensureProducts, handleOrdersReady, handleSyncStatus])
+
   const loadForPage = useCallback(
     async (
       section: DashboardSection,
@@ -89,6 +110,11 @@ export function useMasterData() {
       loadInFlight.current = loadKey
 
       try {
+        if (!options.force && orders.length > 0) {
+          await incrementalRefresh(handleSyncStatus, handleOrdersReady)
+          setLoadedRange(range)
+          return
+        }
         await fetchOrdersForRange(range, handleSyncStatus, handleOrdersReady, options)
         setLoadedRange(range)
       } catch {
@@ -97,13 +123,12 @@ export function useMasterData() {
         loadInFlight.current = null
       }
     },
-    [ensureProducts, handleOrdersReady, handleSyncStatus]
+    [ensureProducts, handleOrdersReady, handleSyncStatus, orders.length]
   )
 
   const refreshPage = useCallback(
-    (section: DashboardSection, filters: GlobalFilters) =>
-      loadForPage(section, filters, { force: true }),
-    [loadForPage]
+    (_section: DashboardSection, _filters: GlobalFilters) => refreshIncremental(),
+    [refreshIncremental]
   )
 
   const syncProductsOnly = useCallback(async () => {
@@ -174,7 +199,7 @@ export function useMasterData() {
     syncProducts: syncProductsOnly,
     syncAll,
     retrySync,
-    printSyncBannerOnInit: printSyncBanner,
+    refreshIncremental,
   }
 }
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { PowerUser } from '../api/types'
-import { formatINR, formatMonthYear, maskPhone } from '../utils/formatters'
+import { formatINR, formatMonthYear, displayPhone } from '../utils/formatters'
 
 interface PowerUsersTableProps {
   users: PowerUser[]
@@ -98,7 +98,7 @@ export function PowerUsersTable({
             {filtered.map((user, i) => (
               <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50">
                 <td className="px-4 py-3 text-sm text-slate-500">{i + 1}</td>
-                <td className="px-4 py-3 text-sm font-medium">{maskPhone(user.phone)}</td>
+                <td className="px-4 py-3 text-sm font-medium">{displayPhone(user.phone)}</td>
                 <td className="px-4 py-3 text-sm">{user.ordersCount}</td>
                 <td className="px-4 py-3 text-sm">{formatINR(user.totalSpent)}</td>
                 <td className="px-4 py-3 text-sm">{formatINR(user.avgOrderValue)}</td>

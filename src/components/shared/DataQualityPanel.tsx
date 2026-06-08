@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
 import type { Order, Product, ProductTagsMap } from '../../api/types'
 import { computeChannelBreakdown, computeDataQuality } from '../../utils/dataQuality'
+import { TableSummaryFooter } from './TableSummaryFooter'
 
 interface DataQualityPanelProps {
   orders: Order[]
   products: Product[]
   productTagsMap: ProductTagsMap
+  embedded?: boolean
 }
 
-export function DataQualityPanel({ orders, products, productTagsMap }: DataQualityPanelProps) {
+export function DataQualityPanel({ orders, products, productTagsMap, embedded = false }: DataQualityPanelProps) {
   const [open, setOpen] = useState(false)
   const checks = useMemo(
     () => computeDataQuality(orders, products, productTagsMap),
@@ -17,19 +19,21 @@ export function DataQualityPanel({ orders, products, productTagsMap }: DataQuali
   const channels = useMemo(() => computeChannelBreakdown(orders), [orders])
 
   return (
-    <div className="card mt-6">
+    <div className={embedded ? undefined : 'card mt-6'}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left"
+        className={`flex w-full items-center justify-between text-left ${embedded ? 'py-2' : 'px-5 py-4'}`}
       >
-        <span className="text-sm font-semibold text-[var(--text-primary)]">Data quality</span>
+        <span className="text-sm font-semibold text-[var(--text-primary)]">
+          {embedded ? 'Checks' : 'Data quality'}
+        </span>
         <span className="text-xs text-[var(--text-secondary)]">
           {checks.filter((c) => !c.ok).length} issues · {open ? 'Hide' : 'Show'}
         </span>
       </button>
       {open && (
-        <div className="border-t border-[var(--border-light)] px-5 py-4">
+        <div className={`border-t border-[var(--border-light)] ${embedded ? 'pt-4' : 'px-5 py-4'}`}>
           <table className="w-full text-sm">
             <thead>
               <tr className="table-header">
@@ -59,6 +63,13 @@ export function DataQualityPanel({ orders, products, productTagsMap }: DataQuali
                 </td>
               </tr>
             </tbody>
+            <TableSummaryFooter
+              cells={[
+                { type: 'text', values: [] },
+                { type: 'text', values: [] },
+                { type: 'count', values: checks.map((c) => c.count) },
+              ]}
+            />
           </table>
         </div>
       )}

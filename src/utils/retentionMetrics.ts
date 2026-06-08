@@ -1,12 +1,9 @@
 import {
   differenceInCalendarDays,
-  endOfDay,
   endOfWeek,
   format,
   parseISO,
-  startOfDay,
   startOfWeek,
-  subDays,
   subWeeks,
 } from 'date-fns'
 import { toZonedTime } from 'date-fns-tz'
@@ -121,53 +118,96 @@ export function computeRepeatFunnel(customers: CustomerSummary[]): FunnelStage[]
   return rows
 }
 
-export function computeDailyPowerUsers(orders: Order[], productTagsMap: ProductTagsMap): DailyPowerUserRow[] {
-  const customers = buildCustomerSummaries(orders, productTagsMap)
+export function computeDailyPowerUsers(orders: Order[], _productTagsMap: ProductTagsMap): DailyPowerUserRow[] {
+  const byCustomer = new Map<string, Order[]>()
+  for (const order of orders) {
+    const cid = order.customer?.id
+    if (!cid) continue
+    const list = byCustomer.get(cid) ?? []
+    list.push(order)
+    byCustomer.set(cid, list)
+  }
+
   const today = toZonedTime(new Date(), IST)
-  const rows: DailyPowerUserRow[] = []
+  type FirstOrderRow = {
+    customerId: string
+    firstOrderDateKey: string
+    isPowerUser: boolean
+    daysToSecond: number | null
+    windowClosed: boolean
+  }
 
-  for (let d = 0; d < 30; d++) {
-    const date = subDays(today, d)
-    const dateStart = startOfDay(date)
-    const dateEnd = endOfDay(date)
+  const customerFirstOrderData: FirstOrderRow[] = []
 
-    const firstTimers = customers.filter((c) => {
-      const firstDate = toZonedTime(new Date(c.firstOrderDate), IST)
-      return firstDate >= dateStart && firstDate <= dateEnd
-    })
+  for (const [cid, customerOrders] of byCustomer) {
+    const sorted = [...customerOrders].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    )
+    const firstOrderIST = toZonedTime(new Date(sorted[0].created_at), IST)
+    const firstOrderDateKey = format(firstOrderIST, 'yyyy-MM-dd')
+    const daysSinceFirst = differenceInCalendarDays(today, firstOrderIST)
+    const windowClosed = daysSinceFirst >= 7
 
-    if (firstTimers.length === 0) continue
+    let daysToSecond: number | null = null
+    let isPowerUser = false
 
-    const daysSinceDate = differenceInCalendarDays(today, dateStart)
-    const window7Closed = daysSinceDate >= 7
-    const window15Closed = daysSinceDate >= 15
-    const window30Closed = daysSinceDate >= 30
+    if (sorted.length >= 2) {
+      const secondOrderIST = toZonedTime(new Date(sorted[1].created_at), IST)
+      daysToSecond = differenceInCalendarDays(secondOrderIST, firstOrderIST)
+      isPowerUser = daysToSecond <= 7
+    }
 
-    const powerUsers7 = window7Closed
-      ? firstTimers.filter((c) => c.daysToSecondOrder != null && c.daysToSecondOrder <= 7).length
-      : null
-    const within15 = window15Closed
-      ? firstTimers.filter((c) => c.daysToSecondOrder != null && c.daysToSecondOrder <= 15).length
-      : null
-    const within30 = window30Closed
-      ? firstTimers.filter((c) => c.daysToSecondOrder != null && c.daysToSecondOrder <= 30).length
-      : null
-
-    rows.push({
-      date: format(dateStart, 'd MMM yyyy'),
-      dateKey: format(dateStart, 'yyyy-MM-dd'),
-      firstTimeOrders: firstTimers.length,
-      powerUsers7,
-      powerUsers7Pct: powerUsers7 != null ? (powerUsers7 / firstTimers.length) * 100 : null,
-      within15,
-      within15Pct: within15 != null ? (within15 / firstTimers.length) * 100 : null,
-      within30,
-      within30Pct: within30 != null ? (within30 / firstTimers.length) * 100 : null,
-      pending7: !window7Closed,
+    customerFirstOrderData.push({
+      customerId: cid,
+      firstOrderDateKey,
+      isPowerUser,
+      daysToSecond,
+      windowClosed,
     })
   }
 
-  return rows
+  const byDate = new Map<string, FirstOrderRow[]>()
+  for (const row of customerFirstOrderData) {
+    const list = byDate.get(row.firstOrderDateKey) ?? []
+    list.push(row)
+    byDate.set(row.firstOrderDateKey, list)
+  }
+
+  const rows: DailyPowerUserRow[] = []
+
+  for (const [dateKey, cohort] of byDate) {
+    const totalFirstTimers = cohort.length
+    const closedWindowCustomers = cohort.filter((c) => c.windowClosed)
+    const openWindowCustomers = cohort.filter((c) => !c.windowClosed)
+
+    const powerUsers =
+      closedWindowCustomers.length > 0
+        ? closedWindowCustomers.filter((c) => c.isPowerUser).length
+        : null
+    const powerUserDenominator = closedWindowCustomers.length
+
+    const within15 = cohort.filter((c) => c.daysToSecond != null && c.daysToSecond <= 15)
+    const within30 = cohort.filter((c) => c.daysToSecond != null && c.daysToSecond <= 30)
+    const daysSinceDate = differenceInCalendarDays(today, parseISO(dateKey))
+
+    rows.push({
+      date: format(parseISO(dateKey), 'd MMM yyyy'),
+      dateKey,
+      firstTimeOrders: totalFirstTimers,
+      powerUsers7: powerUserDenominator > 0 ? powerUsers : null,
+      powerUsers7Pct:
+        powerUserDenominator > 0 && powerUsers != null
+          ? (powerUsers / powerUserDenominator) * 100
+          : null,
+      within15: daysSinceDate >= 15 ? within15.length : null,
+      within15Pct: daysSinceDate >= 15 ? (within15.length / totalFirstTimers) * 100 : null,
+      within30: daysSinceDate >= 30 ? within30.length : null,
+      within30Pct: daysSinceDate >= 30 ? (within30.length / totalFirstTimers) * 100 : null,
+      pending7: openWindowCustomers.length > 0,
+    })
+  }
+
+  return rows.sort((a, b) => b.dateKey.localeCompare(a.dateKey))
 }
 
 export function computeWeeklyPowerUsers(orders: Order[], productTagsMap: ProductTagsMap): WeekPowerUserRow[] {

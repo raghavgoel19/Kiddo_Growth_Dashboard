@@ -8,6 +8,7 @@ interface VirtualTableProps<T> {
   maxHeight?: number
   className?: string
   header: ReactNode
+  footer?: ReactNode
   renderRow: (row: T, index: number) => ReactNode
   getRowKey: (row: T, index: number) => string | number
 }
@@ -19,6 +20,7 @@ function VirtualTableInner<T>({
   maxHeight = 480,
   className = 'w-full text-sm',
   header,
+  footer,
   renderRow,
   getRowKey,
 }: VirtualTableProps<T>) {
@@ -43,6 +45,7 @@ function VirtualTableInner<T>({
             </tr>
           ))}
         </tbody>
+        {footer}
       </table>
     )
   }
@@ -78,6 +81,11 @@ function VirtualTableInner<T>({
           })}
         </div>
       </div>
+      {footer ? (
+        <table className={className}>
+          {footer}
+        </table>
+      ) : null}
     </div>
   )
 }

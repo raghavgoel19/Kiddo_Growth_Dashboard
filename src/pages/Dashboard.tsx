@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppData } from '../hooks/useAppData'
 import { DashboardProvider, useDashboardContext } from '../context/DashboardContext'
 import { ErrorBoundary } from '../components/shared/ErrorBoundary'
@@ -19,7 +19,6 @@ import { ChannelTab } from '../components/full/Channel'
 import { GrowthTab } from '../components/full/Growth'
 import { RetentionTab } from '../components/full/Retention'
 import { CohortBuilder } from '../components/cohorts/CohortBuilder'
-import { SyncMenu } from '../components/shared/SyncMenu'
 import { SyncStatusLabel } from '../components/shared/SyncStatusLabel'
 import { DateFilterBar, AdvancedFilterBar } from '../components/shared/DateFilterBar'
 import { LoadingBar } from '../components/shared/LoadingBar'
@@ -91,9 +90,7 @@ function DashboardShell({
   syncStatus,
   lastFetched,
   loadForPage,
-  refreshPage,
-  syncProducts,
-  syncAll,
+  refreshIncremental,
   retrySync,
 }: ReturnType<typeof useAppData>) {
   const [activeSection, setActiveSection] = useState<SectionId>('today')
@@ -139,9 +136,6 @@ function DashboardShell({
     orderStatus: filters.orderStatuses.includes('all') ? ('all' as const) : filters.orderStatuses[0] ?? 'all',
   }
 
-  const doRefresh = useCallback(() => {
-    void refreshPage(activeSection, filters)
-  }, [refreshPage, activeSection, filters])
 
   // Load data when tab or date filter changes (cache-aware — skips API if fresh).
   useEffect(() => {
@@ -278,22 +272,14 @@ function DashboardShell({
           </h2>
           <div className="flex-1" />
           <SyncStatusLabel status={syncStatus} onRetry={() => void retrySync(activeSection, filters)} />
-          <span className={`inline-block h-2 w-2 rounded-full ${syncDotColor}`} title="Sync status" />
           <button
             type="button"
-            onClick={doRefresh}
-            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-app)]"
-            title="Reload current page for selected date range"
+            onClick={() => void refreshIncremental()}
+            className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+            title="Fetch new orders since last sync"
           >
-            Refresh
+            ↺
           </button>
-          <SyncMenu
-            isRefreshing={isRefreshing}
-            lastSyncedAt={lastFetched}
-            onSyncOrders={() => refreshPage(activeSection, filters)}
-            onSyncProducts={syncProducts}
-            onSyncAll={() => syncAll(activeSection, filters)}
-          />
         </header>
 
         <DateFilterBar />
@@ -346,19 +332,65 @@ function DashboardShell({
                       No orders yet today. Yesterday by {comparisonTime}: {yesterdayMetrics.orders} orders.
                     </div>
                   )}
-                  <DailyMetricsTable orders={todayBaseOrders} productTagsMap={productTagsMap} />
-                  <DailyKPIBar orders={todayBaseOrders} productTagsMap={productTagsMap} />
-                  <SectionCard title="Hourly orders" description={`Cumulative · same-time compare (${comparisonTime} IST)`}>
-                    <HourlyChart orders={todayBaseOrders} />
+                  <SectionCard
+                    title="Daily metrics comparison"
+                    description="Last 8 days · IST · Today through current time"
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => (
+                      <DailyMetricsTable orders={boardOrders} productTagsMap={productTagsMap} embedded />
+                    )}
                   </SectionCard>
-                  <SectionCard title="Category split" description="Today's orders by L1 category.">
-                    <DailyCategorySplit orders={todayOrders} productTagsMap={productTagsMap} />
+                  <SectionCard
+                    title="Today's KPIs"
+                    description="Key metrics for the selected board date range"
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => (
+                      <DailyKPIBar orders={boardOrders} productTagsMap={productTagsMap} />
+                    )}
                   </SectionCard>
-                  <SectionCard title="Channel split" description="App vs website today.">
-                    <DailyChannelSplit orders={todayBaseOrders} />
+                  <SectionCard
+                    title="Hourly orders"
+                    description={`Cumulative · same-time compare (${comparisonTime} IST)`}
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => <HourlyChart orders={boardOrders} />}
                   </SectionCard>
-                  <SectionCard title="Recent orders" description="Last 20 orders today.">
-                    <LiveOrdersFeed orders={todayBaseOrders} productTagsMap={productTagsMap} />
+                  <SectionCard
+                    title="Category split"
+                    description="Orders by L1 category."
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => (
+                      <DailyCategorySplit orders={boardOrders} productTagsMap={productTagsMap} />
+                    )}
+                  </SectionCard>
+                  <SectionCard
+                    title="Channel split"
+                    description="App vs website."
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => <DailyChannelSplit orders={boardOrders} />}
+                  </SectionCard>
+                  <SectionCard
+                    title="Recent orders"
+                    description="Latest orders in range."
+                    orders={todayBaseOrders}
+                    enableBoardDateFilter
+                    defaultBoardPreset="today"
+                  >
+                    {(boardOrders) => <LiveOrdersFeed orders={boardOrders} productTagsMap={productTagsMap} />}
                   </SectionCard>
                 </div>
               )}

@@ -19,6 +19,7 @@ import { parseMoney, formatINR } from '../../utils/formatters'
 import { EmptyState } from '../shared/EmptyState'
 import { useChartDrillDown } from '../../hooks/useChartDrillDown'
 import { filterOrdersForMetric } from '../../utils/drillDownFilters'
+import { SectionCard } from '../shared/SectionCard'
 
 interface TabProps {
   orders: Order[]
@@ -45,15 +46,10 @@ function channelMetrics(orders: Order[]) {
   }
 }
 
-export function ChannelTab({ orders, productTagsMap }: TabProps) {
-  const filtered = orders
-  const { drillFromChart } = useChartDrillDown()
-
-  const metrics = useMemo(() => channelMetrics(filtered), [filtered])
-
+function ChannelShareTrendChart({ orders }: { orders: Order[] }) {
   const weeklyTrend = useMemo(() => {
     const map = new Map<string, { app: number; web: number }>()
-    for (const order of filtered) {
+    for (const order of orders) {
       const week = order.created_at.slice(0, 10)
       const entry = map.get(week) ?? { app: 0, web: 0 }
       if (getOrderChannel(order) === 'app') entry.app++
@@ -68,28 +64,108 @@ export function ChannelTab({ orders, productTagsMap }: TabProps) {
         appPct: v.app + v.web > 0 ? (v.app / (v.app + v.web)) * 100 : 0,
         webPct: v.app + v.web > 0 ? (v.web / (v.app + v.web)) * 100 : 0,
       }))
-  }, [filtered])
+  }, [orders])
 
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={weeklyTrend}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="week" tick={{ fontSize: 9 }} />
+        <YAxis tickFormatter={(v) => `${v}%`} />
+        <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+        <Legend />
+        <Line type="monotone" dataKey="appPct" name="App %" stroke="#00A86B" strokeWidth={2} dot={false} />
+        <Line type="monotone" dataKey="webPct" name="Web %" stroke="#0F172A" strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+function ChannelAOVChart({ orders, productTagsMap }: { orders: Order[]; productTagsMap: ProductTagsMap }) {
+  const { drillFromChart } = useChartDrillDown()
+  const metrics = useMemo(() => channelMetrics(orders), [orders])
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={[{ name: 'App', aov: metrics.app.aov }, { name: 'Web', aov: metrics.web.aov }]}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis dataKey="name" />
+        <YAxis tickFormatter={(v) => formatINR(v)} />
+        <Tooltip formatter={(v: number) => formatINR(v)} />
+        <Bar
+          dataKey="aov"
+          fill="#00A86B"
+          radius={[4, 4, 0, 0]}
+          onClick={(data) =>
+            drillFromChart({
+              title: 'Channel AOV',
+              subtitle: String(data.name),
+              orders: filterOrdersForMetric(orders, productTagsMap, {
+                channel: data.name === 'App' ? 'app' : 'website',
+              }),
+            })
+          }
+        />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function ChannelCategoryChart({ orders, productTagsMap }: { orders: Order[]; productTagsMap: ProductTagsMap }) {
   const categoryByChannel = useMemo(() => {
     return L1_TAGS.map((cat) => {
-      const catOrders = filtered.filter((o) => classifyOrder(o, productTagsMap).includes(cat))
+      const catOrders = orders.filter((o) => classifyOrder(o, productTagsMap).includes(cat))
       const app = catOrders.filter((o) => getOrderChannel(o) === 'app').length
       const web = catOrders.filter((o) => getOrderChannel(o) === 'website').length
       const total = app + web || 1
       return { category: cat, appPct: (app / total) * 100, webPct: (web / total) * 100 }
     }).filter((r) => r.appPct + r.webPct > 0)
-  }, [filtered, productTagsMap])
+  }, [orders, productTagsMap])
 
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={categoryByChannel}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis dataKey="category" tick={{ fontSize: 8 }} interval={0} angle={-20} textAnchor="end" height={50} />
+        <YAxis tickFormatter={(v) => `${v}%`} />
+        <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+        <Legend />
+        <Bar dataKey="appPct" name="App %" fill="#00A86B" stackId="a" />
+        <Bar dataKey="webPct" name="Web %" fill="#0F172A" stackId="a" />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function ChannelPeakHoursChart({ orders }: { orders: Order[] }) {
   const peakHours = useMemo(() => {
     const hours = Array.from({ length: 24 }, (_, h) => h)
     return hours.map((hour) => ({
       hour,
-      app: filtered.filter((o) => getOrderChannel(o) === 'app' && getHourIST(o.created_at) === hour).length,
-      web: filtered.filter((o) => getOrderChannel(o) === 'website' && getHourIST(o.created_at) === hour).length,
+      app: orders.filter((o) => getOrderChannel(o) === 'app' && getHourIST(o.created_at) === hour).length,
+      web: orders.filter((o) => getOrderChannel(o) === 'website' && getHourIST(o.created_at) === hour).length,
     }))
-  }, [filtered])
+  }, [orders])
 
-  if (filtered.length === 0) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={peakHours}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
+        <YAxis />
+        <Tooltip />
+        <Legend />
+        <Bar dataKey="app" name="App" fill="#00A86B" />
+        <Bar dataKey="web" name="Web" fill="#0F172A" />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+export function ChannelTab({ orders, productTagsMap }: TabProps) {
+  const metrics = useMemo(() => channelMetrics(orders), [orders])
+
+  if (orders.length === 0) {
     return <EmptyState message="No orders match the current filters." />
   }
 
@@ -111,72 +187,22 @@ export function ChannelTab({ orders, productTagsMap }: TabProps) {
         ))}
       </div>
 
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">App vs web share trend</h3>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={weeklyTrend}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="week" tick={{ fontSize: 9 }} />
-            <YAxis tickFormatter={(v) => `${v}%`} />
-            <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
-            <Legend />
-            <Line type="monotone" dataKey="appPct" name="App %" stroke="#00A86B" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="webPct" name="Web %" stroke="#0F172A" strokeWidth={2} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      <SectionCard title="App vs web share trend" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => <ChannelShareTrendChart orders={boardOrders} />}
+      </SectionCard>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-card border border-kiddo-border bg-white p-5">
-          <h3 className="mb-4 text-sm font-semibold">AOV comparison</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={[{ name: 'App', aov: metrics.app.aov }, { name: 'Web', aov: metrics.web.aov }]}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis tickFormatter={(v) => formatINR(v)} />
-              <Tooltip formatter={(v: number) => formatINR(v)} />
-              <Bar dataKey="aov" fill="#00A86B" radius={[4, 4, 0, 0]} onClick={(data) =>
-                drillFromChart({
-                  title: 'Channel AOV',
-                  subtitle: String(data.name),
-                  orders: filterOrdersForMetric(filtered, productTagsMap, {
-                    channel: data.name === 'App' ? 'app' : 'website',
-                  }),
-                })
-              } />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="rounded-card border border-kiddo-border bg-white p-5">
-          <h3 className="mb-4 text-sm font-semibold">Category preference by channel</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={categoryByChannel}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="category" tick={{ fontSize: 8 }} interval={0} angle={-20} textAnchor="end" height={50} />
-              <YAxis tickFormatter={(v) => `${v}%`} />
-              <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
-              <Legend />
-              <Bar dataKey="appPct" name="App %" fill="#00A86B" stackId="a" />
-              <Bar dataKey="webPct" name="Web %" fill="#0F172A" stackId="a" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <SectionCard title="AOV comparison" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <ChannelAOVChart orders={boardOrders} productTagsMap={productTagsMap} />}
+        </SectionCard>
+        <SectionCard title="Category preference by channel" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <ChannelCategoryChart orders={boardOrders} productTagsMap={productTagsMap} />}
+        </SectionCard>
       </div>
 
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Peak hour by channel</h3>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={peakHours}>
-            <CartesianGrid vertical={false} strokeDasharray="3 3" />
-            <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="app" name="App" fill="#00A86B" />
-            <Bar dataKey="web" name="Web" fill="#0F172A" />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <SectionCard title="Peak hour by channel" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => <ChannelPeakHoursChart orders={boardOrders} />}
+      </SectionCard>
     </div>
   )
 }

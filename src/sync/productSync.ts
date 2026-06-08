@@ -2,7 +2,7 @@ import type { Product } from '../api/types'
 import { bulkSaveProducts, getAllProducts, getMeta, setMeta } from '../db/orderDB'
 import { fetchProductsPage } from './fetchPages'
 
-const PRODUCT_TTL_HOURS = 24
+const PRODUCT_TTL_HOURS = 6
 
 export async function syncProducts(onProgress?: (count: number) => void): Promise<Product[]> {
   const lastSync = await getMeta('lastProductSyncedAt')

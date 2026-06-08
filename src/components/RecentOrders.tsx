@@ -1,5 +1,5 @@
 import type { Order } from '../api/types'
-import { formatINR, formatIST, maskPhone, parseMoney } from '../utils/formatters'
+import { formatINR, formatIST, displayPhone, parseMoney } from '../utils/formatters'
 import { getOrderItemCount } from '../utils/aggregators'
 
 interface RecentOrdersProps {
@@ -57,7 +57,7 @@ export function RecentOrders({ orders, onRefresh, isRefreshing }: RecentOrdersPr
                   {order.name ?? `#${order.order_number ?? order.id}`}
                 </td>
                 <td className="px-4 py-3 text-sm">{formatIST(order.created_at)}</td>
-                <td className="px-4 py-3 text-sm">{maskPhone(order.customer?.phone)}</td>
+                <td className="px-4 py-3 text-sm">{displayPhone(order.customer?.phone)}</td>
                 <td className="px-4 py-3 text-sm">{getOrderItemCount(order)}</td>
                 <td className="px-4 py-3 text-sm">{formatINR(parseMoney(order.total_price))}</td>
                 <td className="px-4 py-3 text-sm">

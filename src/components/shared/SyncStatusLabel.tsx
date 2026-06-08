@@ -10,7 +10,11 @@ export function SyncStatusLabel({ status, onRetry }: SyncStatusLabelProps) {
   if (status.state === 'idle') return null
 
   if (status.state === 'loading-cache') {
-    return <span className="text-xs text-[var(--text-tertiary)]">Loading from cache…</span>
+    return (
+      <span className="text-xs text-[var(--text-tertiary)]">
+        {status.count.toLocaleString('en-IN')} orders loaded · Checking for new…
+      </span>
+    )
   }
 
   if (status.state === 'syncing') {

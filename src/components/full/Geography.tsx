@@ -13,12 +13,13 @@ import { getDistanceBand, DISTANCE_BANDS } from '../../utils/geography'
 import { parseMoney, formatINR } from '../../utils/formatters'
 import { ExportButton } from '../shared/ExportButton'
 import { downloadCsv, exportFilename } from '../../utils/csv'
-import { InfoTooltipByKey } from '../shared/InfoTooltip'
 import { EmptyState } from '../shared/EmptyState'
 import { useChartDrillDown } from '../../hooks/useChartDrillDown'
 import { filterOrdersForMetric } from '../../utils/drillDownFilters'
 import { computeLocationBreakdown } from '../../utils/dataQuality'
 import type { DistanceBand, Order, ProductTagsMap } from '../../api/types'
+import { SectionCard } from '../shared/SectionCard'
+import { TableSummaryFooter } from '../shared/TableSummaryFooter'
 
 interface TabProps {
   orders: Order[]
@@ -27,33 +28,77 @@ interface TabProps {
   productTagsMap: ProductTagsMap
 }
 
-export function GeographyTab({ orders }: TabProps) {
-  const filtered = orders
+function computeBandStats(orders: Order[]) {
+  const bands = DISTANCE_BANDS.filter((b) => b !== 'unknown')
+  const total = orders.length || 1
+
+  return bands.map((band) => {
+    const bandOrders = orders.filter((o) => getDistanceBand(o) === band)
+    const gmv = bandOrders.reduce((s, o) => s + parseMoney(o.total_price), 0)
+    const repeat = bandOrders.filter((o) => (o.customer?.orders_count ?? 0) > 1).length
+    return {
+      band,
+      orders: bandOrders.length,
+      pct: (bandOrders.length / total) * 100,
+      aov: bandOrders.length > 0 ? gmv / bandOrders.length : 0,
+      repeatRate: bandOrders.length > 0 ? (repeat / bandOrders.length) * 100 : 0,
+    }
+  })
+}
+
+const BAND_COLORS = ['#16A34A', '#2563EB', '#D97706', '#DC2626', '#7C3AED']
+
+function GeographyOrdersByBandChart({ orders }: { orders: Order[] }) {
   const { drillFromChart } = useChartDrillDown()
+  const bandStats = useMemo(() => computeBandStats(orders), [orders])
 
-  const locationStats = useMemo(() => computeLocationBreakdown(filtered), [filtered])
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={bandStats}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis dataKey="band" tick={{ fontSize: 10 }} />
+        <YAxis />
+        <Tooltip />
+        <Bar
+          dataKey="orders"
+          radius={[4, 4, 0, 0]}
+          onClick={(data) =>
+            drillFromChart({
+              title: 'Geo band',
+              subtitle: String(data.band),
+              orders: filterOrdersForMetric(orders, {}, { geoBand: data.band as DistanceBand }),
+            })
+          }
+        >
+          {bandStats.map((_, i) => (
+            <Cell key={i} fill={BAND_COLORS[i % BAND_COLORS.length]} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
 
-  const bandStats = useMemo(() => {
-    const bands = DISTANCE_BANDS.filter((b) => b !== 'unknown')
-    const total = filtered.length || 1
+function GeographyAOVByBandChart({ orders }: { orders: Order[] }) {
+  const bandStats = useMemo(() => computeBandStats(orders), [orders])
 
-    return bands.map((band) => {
-      const bandOrders = filtered.filter((o) => getDistanceBand(o) === band)
-      const gmv = bandOrders.reduce((s, o) => s + parseMoney(o.total_price), 0)
-      const repeat = bandOrders.filter((o) => (o.customer?.orders_count ?? 0) > 1).length
-      return {
-        band,
-        orders: bandOrders.length,
-        pct: (bandOrders.length / total) * 100,
-        aov: bandOrders.length > 0 ? gmv / bandOrders.length : 0,
-        repeatRate: bandOrders.length > 0 ? (repeat / bandOrders.length) * 100 : 0,
-      }
-    })
-  }, [filtered])
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={bandStats}>
+        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <XAxis dataKey="band" tick={{ fontSize: 10 }} />
+        <YAxis tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
+        <Tooltip formatter={(v: number) => formatINR(v)} />
+        <Bar dataKey="aov" fill="#16A34A" radius={[6, 6, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
 
+function GeographyPincodeTable({ orders }: { orders: Order[] }) {
   const pincodeTable = useMemo(() => {
     const map = new Map<string, { orders: number; gmv: number }>()
-    for (const order of filtered) {
+    for (const order of orders) {
       const zip = order.shipping_address?.zip ?? 'Unknown'
       const entry = map.get(zip) ?? { orders: 0, gmv: 0 }
       entry.orders += 1
@@ -64,11 +109,57 @@ export function GeographyTab({ orders }: TabProps) {
       .map(([pincode, v]) => ({ pincode, ...v }))
       .sort((a, b) => b.orders - a.orders)
       .slice(0, 20)
-  }, [filtered])
+  }, [orders])
 
-  const BAND_COLORS = ['#16A34A', '#2563EB', '#D97706', '#DC2626', '#7C3AED']
+  return (
+    <>
+      <div className="mb-4 flex items-center justify-end">
+        <ExportButton
+          onExport={() =>
+            downloadCsv(
+              exportFilename('pincode_table'),
+              ['Pincode', 'Orders', 'GMV'],
+              pincodeTable.map((r) => [r.pincode, r.orders, r.gmv])
+            )
+          }
+        />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[400px] text-sm">
+          <thead>
+            <tr className="table-header border-b border-[var(--border-light)]">
+              <th className="px-4 py-2 text-left">Pincode</th>
+              <th className="px-4 py-2 text-right">Orders</th>
+              <th className="px-4 py-2 text-right">GMV</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pincodeTable.map((row) => (
+              <tr key={row.pincode} className="border-b border-[var(--border-light)] hover:bg-[var(--bg-app)]">
+                <td className="px-4 py-2.5 font-medium">{row.pincode}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{row.orders}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(row.gmv)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <TableSummaryFooter
+            cells={[
+              { type: 'text', values: [], label: `${pincodeTable.length} pincodes` },
+              { type: 'orders', values: pincodeTable.map((r) => r.orders) },
+              { type: 'currency', values: pincodeTable.map((r) => r.gmv) },
+            ]}
+          />
+        </table>
+      </div>
+    </>
+  )
+}
 
-  if (filtered.length === 0) {
+export function GeographyTab({ orders }: TabProps) {
+  const locationStats = useMemo(() => computeLocationBreakdown(orders), [orders])
+  const bandStats = useMemo(() => computeBandStats(orders), [orders])
+
+  if (orders.length === 0) {
     return <EmptyState message="No orders match the current filters." />
   }
 
@@ -99,77 +190,23 @@ export function GeographyTab({ orders }: TabProps) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="card p-5">
-          <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Orders by distance band</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={bandStats}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="band" tick={{ fontSize: 10 }} />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="orders" radius={[4, 4, 0, 0]} onClick={(data) => drillFromChart({
-                title: 'Geo band',
-                subtitle: String(data.band),
-                orders: filterOrdersForMetric(filtered, {}, { geoBand: data.band as DistanceBand }),
-              })}>
-                {bandStats.map((_, i) => (
-                  <Cell key={i} fill={BAND_COLORS[i % BAND_COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="card p-5">
-          <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">AOV by distance band</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={bandStats}>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="band" tick={{ fontSize: 10 }} />
-              <YAxis tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: number) => formatINR(v)} />
-              <Bar dataKey="aov" fill="#16A34A" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <SectionCard title="Orders by distance band" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <GeographyOrdersByBandChart orders={boardOrders} />}
+        </SectionCard>
+        <SectionCard title="AOV by distance band" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <GeographyAOVByBandChart orders={boardOrders} />}
+        </SectionCard>
       </div>
 
-      <div className="card p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--text-primary)]">
-            Top 20 delivery pincodes
-            <InfoTooltipByKey metricKey="pincodeTable" />
-          </h3>
-          <ExportButton
-            onExport={() =>
-              downloadCsv(
-                exportFilename('pincode_table'),
-                ['Pincode', 'Orders', 'GMV'],
-                pincodeTable.map((r) => [r.pincode, r.orders, r.gmv])
-              )
-            }
-          />
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[400px] text-sm">
-            <thead>
-              <tr className="table-header border-b border-[var(--border-light)]">
-                <th className="px-4 py-2 text-left">Pincode</th>
-                <th className="px-4 py-2 text-right">Orders</th>
-                <th className="px-4 py-2 text-right">GMV</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pincodeTable.map((row) => (
-                <tr key={row.pincode} className="border-b border-[var(--border-light)] hover:bg-[var(--bg-app)]">
-                  <td className="px-4 py-2.5 font-medium">{row.pincode}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{row.orders}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(row.gmv)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <SectionCard
+        title="Top 20 delivery pincodes"
+        metricKey="pincodeTable"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="30d"
+      >
+        {(boardOrders) => <GeographyPincodeTable orders={boardOrders} />}
+      </SectionCard>
     </div>
   )
 }

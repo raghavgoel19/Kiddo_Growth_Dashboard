@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getTodayOrders } from '../../utils/dailyMetrics'
 import { getOrderChannel, getOrderChannelLabel } from '../../utils/channel'
 import { classifyOrderPrimary } from '../../utils/taxonomy'
 import { getOrderItemCount } from '../../utils/aggregators'
-import { formatINR, formatIST, parseMoney } from '../../utils/formatters'
+import { formatINR, formatIST, parseMoney, displayPhone } from '../../utils/formatters'
 import type { Order, ProductTagsMap } from '../../api/types'
 import { useDashboardContext } from '../../context/DashboardContext'
 import { ExportButton } from '../shared/ExportButton'
 import { downloadCsv, exportFilename } from '../../utils/csv'
+import { TableSummaryFooter } from '../shared/TableSummaryFooter'
 import { InfoTooltipByKey } from '../shared/InfoTooltip'
 
 interface LiveOrdersFeedProps {
@@ -46,9 +46,9 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
     return () => clearInterval(id)
   }, [])
 
-  const todayOrders = useMemo(
+  const displayOrders = useMemo(
     () =>
-      getTodayOrders(orders)
+      [...orders]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(0, 20),
     [orders, tick]
@@ -57,10 +57,11 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
   const exportRows = () => {
     downloadCsv(
       exportFilename('live_orders'),
-      ['Time', 'Order', 'Channel', 'Category', 'Items', 'Total', 'Customer type'],
-      todayOrders.map((order) => [
+      ['Time', 'Order', 'Phone', 'Channel', 'Category', 'Items', 'Total', 'Customer type'],
+      displayOrders.map((order) => [
         formatIST(order.created_at),
         order.name ?? `#${order.order_number ?? order.id}`,
+        displayPhone(order.customer?.phone),
         getOrderChannelLabel(getOrderChannel(order)),
         classifyOrderPrimary(order, productTagsMap),
         getOrderItemCount(order),
@@ -70,8 +71,17 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
     )
   }
 
-  if (todayOrders.length === 0) {
-    return <p className="text-[13px] text-[var(--text-secondary)]">No orders yet today — check back soon.</p>
+  const orderTotals = useMemo(
+    () => displayOrders.map((o) => parseMoney(o.total_price)),
+    [displayOrders]
+  )
+  const itemTotals = useMemo(
+    () => displayOrders.map((o) => getOrderItemCount(o)),
+    [displayOrders]
+  )
+
+  if (displayOrders.length === 0) {
+    return <p className="text-[13px] text-[var(--text-secondary)]">No orders in this date range.</p>
   }
 
   return (
@@ -85,6 +95,7 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
             <tr className="table-header border-b border-[var(--border-light)]">
               <th className="px-4 py-2 text-left">Time</th>
               <th className="px-4 py-2 text-left">Order</th>
+              <th className="px-4 py-2 text-left">Phone</th>
               <th className="px-4 py-2 text-left">Channel</th>
               <th className="px-4 py-2 text-left">Category</th>
               <th className="px-4 py-2 text-right">Items</th>
@@ -98,7 +109,7 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
             </tr>
           </thead>
           <tbody>
-            {todayOrders.map((order) => (
+            {displayOrders.map((order) => (
               <tr
                 key={order.id}
                 className="cursor-pointer border-b border-[var(--border-light)] hover:bg-[var(--bg-app)]"
@@ -110,6 +121,7 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
                 <td className="px-4 py-2.5 font-medium text-[var(--accent)] hover:underline">
                   {order.name ?? `#${order.order_number ?? order.id}`}
                 </td>
+                <td className="px-4 py-2.5 font-medium text-slate-900">{displayPhone(order.customer?.phone)}</td>
                 <td className="px-4 py-2.5">
                   <ChannelBadge channel={getOrderChannel(order)} />
                 </td>
@@ -126,6 +138,15 @@ export function LiveOrdersFeed({ orders, productTagsMap }: LiveOrdersFeedProps) 
               </tr>
             ))}
           </tbody>
+          <TableSummaryFooter
+            cells={[
+              { type: 'text', values: [], label: `${displayOrders.length} orders shown` },
+              { type: 'text', values: [], colSpan: 4 },
+              { type: 'orders', values: itemTotals },
+              { type: 'currency', values: orderTotals },
+              { type: 'text', values: [] },
+            ]}
+          />
         </table>
       </div>
     </div>

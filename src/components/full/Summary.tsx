@@ -12,7 +12,7 @@ import {
   Pie,
   Cell,
 } from 'recharts'
-import type { Order, ProductTagsMap } from '../../api/types'
+import type { Order, ProductTagsMap, Product } from '../../api/types'
 import { computeKPIs, computeRevenueTrend, computeAOVTrend } from '../../utils/aggregators'
 import { classifyOrder } from '../../utils/taxonomy'
 import { getOrderChannel } from '../../utils/channel'
@@ -23,7 +23,7 @@ import { useChartDrillDown } from '../../hooks/useChartDrillDown'
 import { filterOrdersForMetric } from '../../utils/drillDownFilters'
 import { EmptyState } from '../shared/EmptyState'
 import { DataQualityPanel } from '../shared/DataQualityPanel'
-import type { Product } from '../../api/types'
+import { SectionCard } from '../shared/SectionCard'
 
 interface TabProps {
   orders: Order[]
@@ -35,53 +35,92 @@ interface TabProps {
 
 const CHART_COLORS = ['#16A34A', '#2563EB', '#D97706', '#DC2626', '#7C3AED', '#0891B2', '#DB2777']
 
-export function SummaryTab({ orders, customers, customerCount, productTagsMap, products }: TabProps) {
-  const { compareOrders, compareEnabled, currentLabel, compareLabel } = useTabCompare()
-  const { drillFromChart } = useChartDrillDown()
-
+function SummaryKPIBoard({
+  orders,
+  customers,
+  customerCount,
+}: {
+  orders: Order[]
+  customers: TabProps['customers']
+  customerCount: number
+}) {
   const kpis = useMemo(() => computeKPIs(orders, customers, customerCount), [orders, customers, customerCount])
-  const revenueTrend = useMemo(() => computeRevenueTrend(orders), [orders])
-  const compareRevenueTrend = useMemo(
-    () => (compareEnabled ? computeRevenueTrend(compareOrders) : []),
-    [compareEnabled, compareOrders]
+  const cards = [
+    { label: 'Orders', value: kpis.totalOrders.toLocaleString('en-IN') },
+    { label: 'GMV', value: formatINR(kpis.grossRevenue) },
+    { label: 'AOV', value: formatINR(kpis.averageOrderValue) },
+    { label: 'Customers', value: kpis.totalCustomers.toLocaleString('en-IN') },
+    { label: 'Repeat rate', value: `${kpis.repeatCustomerRate.toFixed(1)}%` },
+    { label: 'Items / order', value: kpis.avgItemsPerOrder.toFixed(1) },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      {cards.map((k) => (
+        <div key={k.label} className="rounded-lg border border-slate-100 bg-slate-50/50 p-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.5px] text-slate-500">{k.label}</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">{k.value}</p>
+        </div>
+      ))}
+    </div>
   )
-  const aovTrend = useMemo(() => computeAOVTrend(orders), [orders])
-  const compareAovTrend = useMemo(
-    () => (compareEnabled ? computeAOVTrend(compareOrders) : []),
-    [compareEnabled, compareOrders]
-  )
+}
 
+function SummaryRevenueChart({
+  orders,
+  compareEnabled,
+  compareOrders,
+  currentLabel,
+  compareLabel,
+}: {
+  orders: Order[]
+  compareEnabled: boolean
+  compareOrders: Order[]
+  currentLabel: string
+  compareLabel: string
+}) {
   const revenueMerged = useMemo(() => {
-    const map = new Map<string, { label: string; revenue: number; orders: number; compareRevenue?: number; compareOrders?: number }>()
+    const revenueTrend = computeRevenueTrend(orders)
+    const compareRevenueTrend = compareEnabled ? computeRevenueTrend(compareOrders) : []
+    const map = new Map<string, { label: string; revenue: number; orders: number; compareRevenue?: number }>()
     for (const d of revenueTrend) {
-      const label = formatMonthLabel(d.month)
-      map.set(d.month, { label, revenue: d.revenue, orders: d.orders })
+      map.set(d.month, { label: formatMonthLabel(d.month), revenue: d.revenue, orders: d.orders })
     }
     for (const d of compareRevenueTrend) {
       const existing = map.get(d.month)
-      if (existing) {
-        existing.compareRevenue = d.revenue
-        existing.compareOrders = d.orders
-      }
+      if (existing) existing.compareRevenue = d.revenue
     }
     return Array.from(map.values())
-  }, [revenueTrend, compareRevenueTrend])
+  }, [orders, compareOrders, compareEnabled])
 
-  const aovMerged = useMemo(() => {
-    const map = new Map<string, { label: string; aov: number; compareAov?: number }>()
-    for (const d of aovTrend) {
-      map.set(d.month, { label: formatMonthLabel(d.month), aov: d.aov })
-    }
-    for (const d of compareAovTrend) {
-      const existing = map.get(d.month)
-      if (existing) existing.compareAov = d.aov
-    }
-    return Array.from(map.values())
-  }, [aovTrend, compareAovTrend])
+  return (
+    <CompareChartWrapper compareEnabled={compareEnabled} currentLabel={currentLabel} compareLabel={compareLabel}>
+      <ComposedChart data={revenueMerged}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+        <YAxis yAxisId="left" tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
+        <YAxis yAxisId="right" orientation="right" />
+        <Tooltip />
+        <Legend />
+        <Bar yAxisId="right" dataKey="orders" name="Orders" fill="#cbd5e1" />
+        <Line yAxisId="left" type="monotone" dataKey="revenue" name="GMV" stroke={COMPARE_LINE_PROPS.currentStroke} strokeWidth={2} dot={false} />
+        {compareEnabled && (
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="compareRevenue"
+            name={compareLabel}
+            stroke={COMPARE_LINE_PROPS.compareStroke}
+            strokeDasharray={COMPARE_LINE_PROPS.compareStrokeDasharray}
+            dot={false}
+          />
+        )}
+      </ComposedChart>
+    </CompareChartWrapper>
+  )
+}
 
-  const overallAOV = aovTrend.length ? aovTrend.reduce((s, p) => s + p.aov, 0) / aovTrend.length : 0
-  const aovWithMean = aovMerged.map((d) => ({ ...d, meanAov: overallAOV }))
-
+function SummaryCategoryDonut({ orders, productTagsMap }: { orders: Order[]; productTagsMap: ProductTagsMap }) {
+  const { drillFromChart } = useChartDrillDown()
   const categoryDonut = useMemo(() => {
     const map = new Map<string, number>()
     for (const order of orders) {
@@ -92,6 +131,36 @@ export function SummaryTab({ orders, customers, customerCount, productTagsMap, p
     return Array.from(map.entries()).map(([name, value]) => ({ name, value }))
   }, [orders, productTagsMap])
 
+  return (
+    <CompareChartWrapper compareEnabled={false} height={240}>
+      <PieChart>
+        <Pie
+          data={categoryDonut}
+          dataKey="value"
+          nameKey="name"
+          innerRadius={50}
+          outerRadius={80}
+          onClick={(_, i) =>
+            drillFromChart({
+              title: 'Category',
+              subtitle: categoryDonut[i]?.name ?? '',
+              orders: filterOrdersForMetric(orders, productTagsMap, { category: categoryDonut[i]?.name }),
+            })
+          }
+        >
+          {categoryDonut.map((_, i) => (
+            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} className="cursor-pointer" />
+          ))}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </CompareChartWrapper>
+  )
+}
+
+function SummaryChannelDonut({ orders, productTagsMap }: { orders: Order[]; productTagsMap: ProductTagsMap }) {
+  const { drillFromChart } = useChartDrillDown()
   const channelDonut = useMemo(() => {
     let app = 0
     let web = 0
@@ -105,144 +174,144 @@ export function SummaryTab({ orders, customers, customerCount, productTagsMap, p
     ].filter((d) => d.value > 0)
   }, [orders])
 
+  return (
+    <CompareChartWrapper compareEnabled={false} height={240}>
+      <PieChart>
+        <Pie
+          data={channelDonut}
+          dataKey="value"
+          nameKey="name"
+          innerRadius={50}
+          outerRadius={80}
+          onClick={(_, i) => {
+            const ch = channelDonut[i]?.name
+            const channel = ch === 'App' ? 'app' : ch === 'Website' ? 'website' : undefined
+            if (channel) {
+              drillFromChart({
+                title: 'Channel',
+                subtitle: ch ?? '',
+                orders: filterOrdersForMetric(orders, productTagsMap, { channel }),
+              })
+            }
+          }}
+        >
+          {channelDonut.map((_, i) => (
+            <Cell key={i} fill={CHART_COLORS[i % 2]} className="cursor-pointer" />
+          ))}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </CompareChartWrapper>
+  )
+}
+
+function SummaryAOVChart({
+  orders,
+  compareEnabled,
+  compareOrders,
+  currentLabel,
+  compareLabel,
+}: {
+  orders: Order[]
+  compareEnabled: boolean
+  compareOrders: Order[]
+  currentLabel: string
+  compareLabel: string
+}) {
+  const aovWithMean = useMemo(() => {
+    const aovTrend = computeAOVTrend(orders)
+    const compareAovTrend = compareEnabled ? computeAOVTrend(compareOrders) : []
+    const map = new Map<string, { label: string; aov: number; compareAov?: number }>()
+    for (const d of aovTrend) {
+      map.set(d.month, { label: formatMonthLabel(d.month), aov: d.aov })
+    }
+    for (const d of compareAovTrend) {
+      const existing = map.get(d.month)
+      if (existing) existing.compareAov = d.aov
+    }
+    const overallAOV = aovTrend.length ? aovTrend.reduce((s, p) => s + p.aov, 0) / aovTrend.length : 0
+    return Array.from(map.values()).map((d) => ({ ...d, meanAov: overallAOV }))
+  }, [orders, compareOrders, compareEnabled])
+
+  return (
+    <CompareChartWrapper compareEnabled={compareEnabled} currentLabel={currentLabel} compareLabel={compareLabel} height={220}>
+      <ComposedChart data={aovWithMean}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+        <YAxis tickFormatter={(v) => formatINR(v)} />
+        <Tooltip formatter={(v: number) => formatINR(v)} />
+        <Legend />
+        <Line type="monotone" dataKey="aov" name="AOV" stroke={COMPARE_LINE_PROPS.currentStroke} strokeWidth={2} dot={false} />
+        {compareEnabled && (
+          <Line
+            type="monotone"
+            dataKey="compareAov"
+            name={compareLabel}
+            stroke={COMPARE_LINE_PROPS.compareStroke}
+            strokeDasharray={COMPARE_LINE_PROPS.compareStrokeDasharray}
+            dot={false}
+          />
+        )}
+        <Line type="monotone" dataKey="meanAov" name="Mean AOV" stroke="#94a3b8" strokeDasharray="4 4" dot={false} />
+      </ComposedChart>
+    </CompareChartWrapper>
+  )
+}
+
+export function SummaryTab({ orders, customers, customerCount, productTagsMap, products }: TabProps) {
+  const { compareOrders, compareEnabled, currentLabel, compareLabel } = useTabCompare()
+
   if (orders.length === 0) {
     return <EmptyState message="No orders match the current filters." />
   }
 
-  const kpiCards = [
-    { label: 'Orders', value: kpis.totalOrders.toLocaleString('en-IN') },
-    { label: 'GMV', value: formatINR(kpis.grossRevenue) },
-    { label: 'AOV', value: formatINR(kpis.averageOrderValue) },
-    { label: 'Customers', value: kpis.totalCustomers.toLocaleString('en-IN') },
-    { label: 'Repeat rate', value: `${kpis.repeatCustomerRate.toFixed(1)}%` },
-    { label: 'Items / order', value: kpis.avgItemsPerOrder.toFixed(1) },
-  ]
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-        {kpiCards.map((k) => (
-          <div key={k.label} className="card p-5">
-            <p className="text-[11px] font-medium uppercase tracking-[0.5px] text-[var(--text-secondary)]">{k.label}</p>
-            <p className="mt-2 text-[28px] font-bold tabular-nums text-[var(--text-primary)]">{k.value}</p>
-          </div>
-        ))}
-      </div>
+      <SectionCard title="Overview KPIs" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => (
+          <SummaryKPIBoard orders={boardOrders} customers={customers} customerCount={customerCount} />
+        )}
+      </SectionCard>
 
-      <div className="card p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Revenue & orders (monthly)</h3>
-        <CompareChartWrapper compareEnabled={compareEnabled} currentLabel={currentLabel} compareLabel={compareLabel}>
-          <ComposedChart data={revenueMerged}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-            <YAxis yAxisId="left" tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-            <YAxis yAxisId="right" orientation="right" />
-            <Tooltip />
-            <Legend />
-            <Bar yAxisId="right" dataKey="orders" name="Orders" fill="#cbd5e1" />
-            <Line yAxisId="left" type="monotone" dataKey="revenue" name="GMV" stroke={COMPARE_LINE_PROPS.currentStroke} strokeWidth={2} dot={false} />
-            {compareEnabled && (
-              <Line
-                yAxisId="left"
-                type="monotone"
-                dataKey="compareRevenue"
-                name={compareLabel}
-                stroke={COMPARE_LINE_PROPS.compareStroke}
-                strokeDasharray={COMPARE_LINE_PROPS.compareStrokeDasharray}
-                dot={false}
-              />
-            )}
-          </ComposedChart>
-        </CompareChartWrapper>
-      </div>
+      <SectionCard title="Revenue & orders (monthly)" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => (
+          <SummaryRevenueChart
+            orders={boardOrders}
+            compareEnabled={compareEnabled}
+            compareOrders={compareOrders}
+            currentLabel={currentLabel}
+            compareLabel={compareLabel}
+          />
+        )}
+      </SectionCard>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="card p-5">
-          <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">L1 category mix</h3>
-          <CompareChartWrapper compareEnabled={false} height={240}>
-            <PieChart>
-              <Pie
-                data={categoryDonut}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={50}
-                outerRadius={80}
-                onClick={(_, i) =>
-                  drillFromChart({
-                    title: 'Category',
-                    subtitle: categoryDonut[i]?.name ?? '',
-                    orders: filterOrdersForMetric(orders, productTagsMap, { category: categoryDonut[i]?.name }),
-                  })
-                }
-              >
-                {categoryDonut.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} className="cursor-pointer" />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </CompareChartWrapper>
-        </div>
-        <div className="card p-5">
-          <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">App vs website</h3>
-          <CompareChartWrapper compareEnabled={false} height={240}>
-            <PieChart>
-              <Pie
-                data={channelDonut}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={50}
-                outerRadius={80}
-                onClick={(_, i) => {
-                  const ch = channelDonut[i]?.name
-                  const channel = ch === 'App' ? 'app' : ch === 'Website' ? 'website' : undefined
-                  if (channel) {
-                    drillFromChart({
-                      title: 'Channel',
-                      subtitle: ch ?? '',
-                      orders: filterOrdersForMetric(orders, productTagsMap, { channel }),
-                    })
-                  }
-                }}
-              >
-                {channelDonut.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % 2]} className="cursor-pointer" />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </CompareChartWrapper>
-        </div>
+        <SectionCard title="L1 category mix" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <SummaryCategoryDonut orders={boardOrders} productTagsMap={productTagsMap} />}
+        </SectionCard>
+        <SectionCard title="App vs website" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+          {(boardOrders) => <SummaryChannelDonut orders={boardOrders} productTagsMap={productTagsMap} />}
+        </SectionCard>
       </div>
 
-      <div className="card p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">AOV trend</h3>
-        <CompareChartWrapper compareEnabled={compareEnabled} currentLabel={currentLabel} compareLabel={compareLabel} height={220}>
-          <ComposedChart data={aovWithMean}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-            <YAxis tickFormatter={(v) => formatINR(v)} />
-            <Tooltip formatter={(v: number) => formatINR(v)} />
-            <Legend />
-            <Line type="monotone" dataKey="aov" name="AOV" stroke={COMPARE_LINE_PROPS.currentStroke} strokeWidth={2} dot={false} />
-            {compareEnabled && (
-              <Line
-                type="monotone"
-                dataKey="compareAov"
-                name={compareLabel}
-                stroke={COMPARE_LINE_PROPS.compareStroke}
-                strokeDasharray={COMPARE_LINE_PROPS.compareStrokeDasharray}
-                dot={false}
-              />
-            )}
-            <Line type="monotone" dataKey="meanAov" name="Mean AOV" stroke="#94a3b8" strokeDasharray="4 4" dot={false} />
-          </ComposedChart>
-        </CompareChartWrapper>
-      </div>
+      <SectionCard title="AOV trend" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => (
+          <SummaryAOVChart
+            orders={boardOrders}
+            compareEnabled={compareEnabled}
+            compareOrders={compareOrders}
+            currentLabel={currentLabel}
+            compareLabel={compareLabel}
+          />
+        )}
+      </SectionCard>
 
-      <DataQualityPanel orders={orders} products={products} productTagsMap={productTagsMap} />
+      <SectionCard title="Data quality" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        {(boardOrders) => (
+          <DataQualityPanel orders={boardOrders} products={products} productTagsMap={productTagsMap} embedded />
+        )}
+      </SectionCard>
     </div>
   )
 }

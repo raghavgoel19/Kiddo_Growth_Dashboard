@@ -125,6 +125,7 @@ export const CohortBuilder = memo(function CohortBuilder() {
           </div>
         ) : (
           <CohortResultsPanel
+            storeOrders={filteredOrders}
             analysis={
               analysis ?? {
                 customers: [],

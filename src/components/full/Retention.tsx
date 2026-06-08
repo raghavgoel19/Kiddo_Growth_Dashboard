@@ -13,47 +13,38 @@ import {
 import { format } from 'date-fns'
 import { toZonedTime } from 'date-fns-tz'
 import type { Order, ProductTagsMap } from '../../api/types'
-import { useWorkerQuery } from '../../hooks/useComputeWorker'
-import type {
-  DailyPowerUserRow,
-  FunnelStage,
-  L2RepeatRow,
-  MonthlyFrequency,
+import type { L2RepeatRow } from '../../utils/retentionMetrics'
+import {
+  computeDailyPowerUsers,
+  computeL2RepeatRates,
+  computeMonthlyFrequency,
+  computeOrderCountCohortComparison,
+  computeRepeatFunnel,
+  powerPctBg,
+  powerPctColor,
 } from '../../utils/retentionMetrics'
-import { powerPctBg, powerPctColor } from '../../utils/retentionMetrics'
 import { formatINR, parseMoney } from '../../utils/formatters'
 import { IST } from '../../utils/dates'
 import { EmptyState } from '../shared/EmptyState'
+import { BoardSection } from '../shared/BoardSection'
+import { TableSummaryFooter } from '../shared/TableSummaryFooter'
+import { FirstOrderSignalsPanel } from '../retention/FirstOrderSignalsPanel'
+import { ChurnRiskPanel } from '../retention/ChurnRiskPanel'
+import { InterventionTimingPanel } from '../retention/InterventionTimingPanel'
+import { LtvProjectionsPanel } from '../retention/LtvProjectionsPanel'
+import { avg, buildCustomerSummaries } from '../../utils/customerSummary'
 import type { CustomerSummary } from '../../utils/customerSummary'
-import { avg } from '../../utils/customerSummary'
 
 interface RetentionTabProps {
   orders: Order[]
   productTagsMap: ProductTagsMap
 }
 
-interface OrderCountCohortRow {
-  label: string
-  customers: number
-  pctOfAll: number
-  avgFirstAov: number
-  topL1: string
-  appPct: number
-  avgDaysToSecond: number
-  pctSecond7d: number
-  cohort: CustomerSummary[]
-}
-
-interface RetentionBundleResult {
-  monthlyFrequency: MonthlyFrequency[]
-  funnel: FunnelStage[]
-  dailyPower: DailyPowerUserRow[]
-  weeklyPower: unknown[]
-  l2Repeat: L2RepeatRow[]
-  orderCountCohorts: OrderCountCohortRow[]
-}
-
 const SUB_TABS = [
+  'First Order Signals',
+  'Churn Risk',
+  'Intervention Timing',
+  'LTV Projections',
   'Monthly Frequency',
   'Repeat Rate Funnel',
   'Power Users',
@@ -79,13 +70,62 @@ type L2SortKey = keyof Pick<
   'l2Tag' | 'totalBuyers' | 'repeaters' | 'repeatRate' | 'avgOrdersRepeaters' | 'avgDaysToRepeat' | 'avgFirstOrderAOV'
 >
 
-const PctCell = memo(function PctCell({ pct, count }: { pct: number | null; count: number | null }) {
+function computeLatestMonthDistribution(boardOrders: Order[]) {
+  if (boardOrders.length === 0) return { latestMonthDistribution: [], latestMonthLabel: '' }
+
+  const byMonth = new Map<string, Order[]>()
+  for (const order of boardOrders) {
+    const month = format(toZonedTime(new Date(order.created_at), IST), 'yyyy-MM')
+    const list = byMonth.get(month) ?? []
+    list.push(order)
+    byMonth.set(month, list)
+  }
+
+  const months = Array.from(byMonth.keys()).sort()
+  const latestMonth = months[months.length - 1]
+  if (!latestMonth) return { latestMonthDistribution: [], latestMonthLabel: '' }
+
+  const monthOrders = byMonth.get(latestMonth)!
+  const customerCounts = new Map<string | number, number>()
+  for (const o of monthOrders) {
+    const id = o.customer?.id
+    if (!id) continue
+    customerCounts.set(id, (customerCounts.get(id) ?? 0) + 1)
+  }
+
+  const buckets = ['1', '2', '3', '4', '5+'] as const
+  const distribution = buckets.map((orderCount) => {
+    let customers = 0
+    for (const count of customerCounts.values()) {
+      if (orderCount === '5+' && count >= 5) customers++
+      else if (orderCount === String(count)) customers++
+    }
+    return { orderCount, customers }
+  })
+
+  const label = format(toZonedTime(new Date(`${latestMonth}-01`), IST), 'MMM yyyy')
+  return { latestMonthDistribution: distribution, latestMonthLabel: label }
+}
+
+const PctCell = memo(function PctCell({
+  pct,
+  count,
+  pending,
+}: {
+  pct: number | null
+  count: number | null
+  pending?: boolean
+}) {
+  if (pending && count == null) {
+    return <span className="text-xs italic text-slate-400">pending…</span>
+  }
   if (pct == null || count == null) {
-    return <span className="text-slate-400">pending…</span>
+    return <span className="text-slate-400">—</span>
   }
   return (
     <span className={`inline-block rounded px-2 py-0.5 tabular-nums text-xs ${powerPctBg(pct)} ${powerPctColor(pct)}`}>
       {count.toLocaleString('en-IN')} ({pct.toFixed(1)}%)
+      {pending ? <span className="ml-1 font-normal text-slate-400">*</span> : null}
     </span>
   )
 })
@@ -119,61 +159,103 @@ const SubTabBar = memo(function SubTabBar({
   )
 })
 
-const MonthlyFrequencyPanel = memo(function MonthlyFrequencyPanel({
-  monthlyFrequency,
-  latestMonthDistribution,
-  latestMonthLabel,
+const MonthlyFrequencyLineChart = memo(function MonthlyFrequencyLineChart({
+  boardOrders,
 }: {
-  monthlyFrequency: MonthlyFrequency[]
-  latestMonthDistribution: { orderCount: string; customers: number }[]
-  latestMonthLabel: string
+  boardOrders: Order[]
+}) {
+  const monthlyFrequency = useMemo(() => computeMonthlyFrequency(boardOrders), [boardOrders])
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={monthlyFrequency}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+        <YAxis tick={{ fontSize: 10 }} />
+        <Tooltip formatter={(v: number) => v.toFixed(2)} />
+        <Line
+          type="monotone"
+          dataKey="avgOrdersPerUser"
+          stroke="#00A86B"
+          strokeWidth={2}
+          dot={false}
+          name="Avg orders / user"
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+})
+
+const MonthlyFrequencyDistributionChart = memo(function MonthlyFrequencyDistributionChart({
+  boardOrders,
+}: {
+  boardOrders: Order[]
+}) {
+  const { latestMonthDistribution, latestMonthLabel } = useMemo(
+    () => computeLatestMonthDistribution(boardOrders),
+    [boardOrders]
+  )
+
+  return (
+    <>
+      <p className="mb-4 text-xs text-slate-500">Customers by orders placed in {latestMonthLabel}</p>
+      <ResponsiveContainer width="100%" height={240}>
+        <BarChart data={latestMonthDistribution}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="orderCount" tick={{ fontSize: 10 }} label={{ value: 'Orders', position: 'insideBottom', offset: -2, fontSize: 10 }} />
+          <YAxis tick={{ fontSize: 10 }} />
+          <Tooltip />
+          <Bar dataKey="customers" fill="#00A86B" name="Customers" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </>
+  )
+})
+
+const MonthlyFrequencyPanel = memo(function MonthlyFrequencyPanel({
+  orders,
+}: {
+  orders: Order[]
 }) {
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Avg orders per active customer</h3>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={monthlyFrequency}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v: number) => v.toFixed(2)} />
-            <Line
-              type="monotone"
-              dataKey="avgOrdersPerUser"
-              stroke="#00A86B"
-              strokeWidth={2}
-              dot={false}
-              name="Avg orders / user"
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-1 text-sm font-semibold">Order count distribution</h3>
-        <p className="mb-4 text-xs text-slate-500">Customers by orders placed in {latestMonthLabel}</p>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={latestMonthDistribution}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="orderCount" tick={{ fontSize: 10 }} label={{ value: 'Orders', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} />
-            <Tooltip />
-            <Bar dataKey="customers" fill="#00A86B" name="Customers" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <BoardSection
+        title="Avg orders per active customer"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="90d"
+      >
+        {(boardOrders) => <MonthlyFrequencyLineChart boardOrders={boardOrders} />}
+      </BoardSection>
+      <BoardSection
+        title="Order count distribution"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="90d"
+      >
+        {(boardOrders) => <MonthlyFrequencyDistributionChart boardOrders={boardOrders} />}
+      </BoardSection>
     </div>
   )
 })
 
-const RepeatFunnelPanel = memo(function RepeatFunnelPanel({ funnel }: { funnel: FunnelStage[] }) {
+const RepeatFunnelContent = memo(function RepeatFunnelContent({
+  boardOrders,
+  productTagsMap,
+}: {
+  boardOrders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
   const [view, setView] = useState<'funnel' | 'table'>('funnel')
+  const funnel = useMemo(() => {
+    const summaries = buildCustomerSummaries(boardOrders, productTagsMap)
+    return computeRepeatFunnel(summaries)
+  }, [boardOrders, productTagsMap])
   const maxCustomers = funnel[0]?.customers ?? 1
 
   return (
-    <div className="rounded-card border border-kiddo-border bg-white p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-sm font-semibold">Repeat rate funnel</h3>
+    <>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex gap-1 rounded-md border border-kiddo-border p-0.5">
           {(['funnel', 'table'] as const).map((mode) => (
             <button
@@ -240,72 +322,172 @@ const RepeatFunnelPanel = memo(function RepeatFunnelPanel({ funnel }: { funnel: 
                 </tr>
               ))}
             </tbody>
+            <TableSummaryFooter
+              cells={[
+                { type: 'text', values: [] },
+                {
+                  type: 'count',
+                  values: funnel.length > 0 ? [funnel[0]!.customers] : [],
+                  label: funnel.length > 0 ? funnel[0]!.customers.toLocaleString('en-IN') : '—',
+                },
+                {
+                  type: 'percentage',
+                  values: funnel
+                    .map((s) => s.pctFromPrevious)
+                    .filter((p): p is number => p != null),
+                },
+                { type: 'percentage', values: funnel.map((s) => s.pctFromTotal) },
+              ]}
+            />
           </table>
         </div>
       )}
-    </div>
+    </>
   )
 })
 
-const PowerUsersPanel = memo(function PowerUsersPanel({ dailyPower }: { dailyPower: DailyPowerUserRow[] }) {
-  const chartData = useMemo(() => [...dailyPower].reverse(), [dailyPower])
+const RepeatFunnelPanel = memo(function RepeatFunnelPanel({
+  orders,
+  productTagsMap,
+}: {
+  orders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
+  return (
+    <BoardSection
+      title="Repeat rate funnel"
+      orders={orders}
+      enableBoardDateFilter
+      defaultBoardPreset="30d"
+    >
+      {(boardOrders) => <RepeatFunnelContent boardOrders={boardOrders} productTagsMap={productTagsMap} />}
+    </BoardSection>
+  )
+})
+
+const PowerUsersLineChart = memo(function PowerUsersLineChart({
+  boardOrders,
+  productTagsMap,
+}: {
+  boardOrders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
+  const chartData = useMemo(() => {
+    const dailyPower = computeDailyPowerUsers(boardOrders, productTagsMap)
+    return [...dailyPower].reverse()
+  }, [boardOrders, productTagsMap])
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Power user rate (7-day window)</h3>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-            <YAxis tick={{ fontSize: 10 }} unit="%" />
-            <Tooltip formatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : 'pending…')} />
-            <Line
-              type="monotone"
-              dataKey="powerUsers7Pct"
-              stroke="#00A86B"
-              strokeWidth={2}
-              dot={false}
-              connectNulls={false}
-              name="Power users (7d)"
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="date" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+        <YAxis tick={{ fontSize: 10 }} unit="%" />
+        <Tooltip formatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}%` : 'pending…')} />
+        <Line
+          type="monotone"
+          dataKey="powerUsers7Pct"
+          stroke="#00A86B"
+          strokeWidth={2}
+          dot={false}
+          connectNulls={false}
+          name="Power users (7d)"
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+})
 
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Daily first-time cohorts</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase text-slate-400">
-                <th className="pb-2 pr-4">Date</th>
-                <th className="pb-2 pr-4 text-right">1st time orders</th>
-                <th className="pb-2 pr-4 text-right">Power users (7d)</th>
-                <th className="pb-2 pr-4 text-right">≤15d</th>
-                <th className="pb-2 text-right">≤30d</th>
+const PowerUsersCohortsTable = memo(function PowerUsersCohortsTable({
+  boardOrders,
+  productTagsMap,
+}: {
+  boardOrders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
+  const dailyPower = useMemo(
+    () => computeDailyPowerUsers(boardOrders, productTagsMap),
+    [boardOrders, productTagsMap]
+  )
+
+  const closedPctRows = dailyPower.filter((r) => r.powerUsers7Pct != null)
+  const within15Rows = dailyPower.filter((r) => r.within15Pct != null)
+  const within30Rows = dailyPower.filter((r) => r.within30Pct != null)
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs uppercase text-slate-400">
+              <th className="pb-2 pr-4">Date</th>
+              <th className="pb-2 pr-4 text-right">1st time orders</th>
+              <th className="pb-2 pr-4 text-right">Power users (7d)</th>
+              <th className="pb-2 pr-4 text-right">≤15d</th>
+              <th className="pb-2 text-right">≤30d</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dailyPower.map((row) => (
+              <tr key={row.dateKey} className="border-t border-slate-100">
+                <td className="py-2 pr-4 font-medium">{row.date}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.firstTimeOrders.toLocaleString('en-IN')}</td>
+                <td className="py-2 pr-4 text-right">
+                  <PctCell pct={row.powerUsers7Pct} count={row.powerUsers7} pending={row.pending7} />
+                </td>
+                <td className="py-2 pr-4 text-right">
+                  <PctCell pct={row.within15Pct} count={row.within15} />
+                </td>
+                <td className="py-2 text-right">
+                  <PctCell pct={row.within30Pct} count={row.within30} />
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {dailyPower.map((row) => (
-                <tr key={row.dateKey} className="border-t border-slate-100">
-                  <td className="py-2 pr-4 font-medium">{row.date}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.firstTimeOrders.toLocaleString('en-IN')}</td>
-                  <td className="py-2 pr-4 text-right">
-                    <PctCell pct={row.powerUsers7Pct} count={row.powerUsers7} />
-                  </td>
-                  <td className="py-2 pr-4 text-right">
-                    <PctCell pct={row.within15Pct} count={row.within15} />
-                  </td>
-                  <td className="py-2 text-right">
-                    <PctCell pct={row.within30Pct} count={row.within30} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+          <TableSummaryFooter
+            cells={[
+              { type: 'text', values: [] },
+              { type: 'count', values: dailyPower.map((r) => r.firstTimeOrders) },
+              { type: 'percentage', values: closedPctRows.map((r) => r.powerUsers7Pct!) },
+              { type: 'percentage', values: within15Rows.map((r) => r.within15Pct!) },
+              { type: 'percentage', values: within30Rows.map((r) => r.within30Pct!) },
+            ]}
+          />
+        </table>
       </div>
+      <p className="mt-2 text-xs text-slate-500">
+        * 7-day window not yet fully closed. Final number may increase.
+      </p>
+    </>
+  )
+})
+
+const PowerUsersPanel = memo(function PowerUsersPanel({
+  orders,
+  productTagsMap,
+}: {
+  orders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
+  return (
+    <div className="space-y-6">
+      <BoardSection
+        title="Power user rate (7-day window)"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="30d"
+      >
+        {(boardOrders) => <PowerUsersLineChart boardOrders={boardOrders} productTagsMap={productTagsMap} />}
+      </BoardSection>
+
+      <BoardSection
+        title="Daily first-time cohorts"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="30d"
+      >
+        {(boardOrders) => <PowerUsersCohortsTable boardOrders={boardOrders} productTagsMap={productTagsMap} />}
+      </BoardSection>
     </div>
   )
 })
@@ -325,12 +507,19 @@ function statsForCohort(cohort: CustomerSummary[], allCustomers: number) {
   }
 }
 
-const OrderCountCohortsPanel = memo(function OrderCountCohortsPanel({
-  orderCountCohorts,
+const OrderCountCohortsContent = memo(function OrderCountCohortsContent({
+  boardOrders,
+  productTagsMap,
 }: {
-  orderCountCohorts: OrderCountCohortRow[]
+  boardOrders: Order[]
+  productTagsMap: ProductTagsMap
 }) {
   const [cohortTab, setCohortTab] = useState<CohortSubTab>('2')
+  const orderCountCohorts = useMemo(() => {
+    const summaries = buildCustomerSummaries(boardOrders, productTagsMap)
+    return computeOrderCountCohortComparison(summaries)
+  }, [boardOrders, productTagsMap])
+
   const totalCustomers = useMemo(
     () => orderCountCohorts.reduce((s, r) => s + r.customers, 0),
     [orderCountCohorts]
@@ -358,40 +547,49 @@ const OrderCountCohortsPanel = memo(function OrderCountCohortsPanel({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Order count cohort comparison</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase text-slate-400">
-                <th className="pb-2 pr-4">Bucket</th>
-                <th className="pb-2 pr-4 text-right">Customers</th>
-                <th className="pb-2 pr-4 text-right">% of all</th>
-                <th className="pb-2 pr-4 text-right">Avg 1st AOV</th>
-                <th className="pb-2 pr-4">Top L1</th>
-                <th className="pb-2 pr-4 text-right">App %</th>
-                <th className="pb-2 pr-4 text-right">Avg days to 2nd</th>
-                <th className="pb-2 text-right">2nd within 7d</th>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs uppercase text-slate-400">
+              <th className="pb-2 pr-4">Bucket</th>
+              <th className="pb-2 pr-4 text-right">Customers</th>
+              <th className="pb-2 pr-4 text-right">% of all</th>
+              <th className="pb-2 pr-4 text-right">Avg 1st AOV</th>
+              <th className="pb-2 pr-4">Top L1</th>
+              <th className="pb-2 pr-4 text-right">App %</th>
+              <th className="pb-2 pr-4 text-right">Avg days to 2nd</th>
+              <th className="pb-2 text-right">2nd within 7d</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orderCountCohorts.map((row) => (
+              <tr key={row.label} className="border-t border-slate-100">
+                <td className="py-2 pr-4 font-medium">{row.label}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.customers.toLocaleString('en-IN')}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.pctOfAll.toFixed(1)}%</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{formatINR(row.avgFirstAov)}</td>
+                <td className="py-2 pr-4">{row.topL1}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.appPct.toFixed(1)}%</td>
+                <td className="py-2 pr-4 text-right tabular-nums">
+                  {row.avgDaysToSecond > 0 ? row.avgDaysToSecond.toFixed(1) : '—'}
+                </td>
+                <td className="py-2 text-right tabular-nums">{row.pctSecond7d.toFixed(1)}%</td>
               </tr>
-            </thead>
-            <tbody>
-              {orderCountCohorts.map((row) => (
-                <tr key={row.label} className="border-t border-slate-100">
-                  <td className="py-2 pr-4 font-medium">{row.label}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.customers.toLocaleString('en-IN')}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.pctOfAll.toFixed(1)}%</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{formatINR(row.avgFirstAov)}</td>
-                  <td className="py-2 pr-4">{row.topL1}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.appPct.toFixed(1)}%</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">
-                    {row.avgDaysToSecond > 0 ? row.avgDaysToSecond.toFixed(1) : '—'}
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{row.pctSecond7d.toFixed(1)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+          <TableSummaryFooter
+            cells={[
+              { type: 'text', values: [] },
+              { type: 'count', values: orderCountCohorts.map((r) => r.customers) },
+              { type: 'percentage', values: orderCountCohorts.map((r) => r.pctOfAll) },
+              { type: 'aov', values: orderCountCohorts.map((r) => r.avgFirstAov) },
+              { type: 'text', values: [] },
+              { type: 'percentage', values: orderCountCohorts.map((r) => r.appPct) },
+              { type: 'days', values: orderCountCohorts.filter((r) => r.avgDaysToSecond > 0).map((r) => r.avgDaysToSecond) },
+              { type: 'percentage', values: orderCountCohorts.map((r) => r.pctSecond7d) },
+            ]}
+          />
+        </table>
       </div>
 
       <div className="rounded-card border border-kiddo-border bg-white p-5">
@@ -417,7 +615,47 @@ const OrderCountCohortsPanel = memo(function OrderCountCohortsPanel({
   )
 })
 
-const L2RepeatPanel = memo(function L2RepeatPanel({ l2Repeat }: { l2Repeat: L2RepeatRow[] }) {
+const OrderCountCohortsPanel = memo(function OrderCountCohortsPanel({
+  orders,
+  productTagsMap,
+}: {
+  orders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
+  return (
+    <BoardSection
+      title="Order count cohort comparison"
+      orders={orders}
+      enableBoardDateFilter
+      defaultBoardPreset="30d"
+    >
+      {(boardOrders) => (
+        <OrderCountCohortsContent boardOrders={boardOrders} productTagsMap={productTagsMap} />
+      )}
+    </BoardSection>
+  )
+})
+
+const L2RepeatBarChart = memo(function L2RepeatBarChart({ l2Repeat }: { l2Repeat: L2RepeatRow[] }) {
+  const chartData = useMemo(
+    () => l2Repeat.slice(0, 20).map((r) => ({ name: r.l2Tag, repeatRate: r.repeatRate })),
+    [l2Repeat]
+  )
+
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(320, chartData.length * 28)}>
+      <BarChart data={chartData} layout="vertical" margin={{ left: 80 }}>
+        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+        <XAxis type="number" unit="%" tick={{ fontSize: 10 }} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={75} />
+        <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+        <Bar dataKey="repeatRate" fill="#00A86B" radius={[0, 4, 4, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+})
+
+const L2RepeatPatternsTable = memo(function L2RepeatPatternsTable({ l2Repeat }: { l2Repeat: L2RepeatRow[] }) {
   const [sortKey, setSortKey] = useState<L2SortKey>('repeatRate')
   const [sortAsc, setSortAsc] = useState(false)
 
@@ -431,11 +669,6 @@ const L2RepeatPanel = memo(function L2RepeatPanel({ l2Repeat }: { l2Repeat: L2Re
     })
     return rows
   }, [l2Repeat, sortKey, sortAsc])
-
-  const chartData = useMemo(
-    () => sorted.slice(0, 20).map((r) => ({ name: r.l2Tag, repeatRate: r.repeatRate })),
-    [sorted]
-  )
 
   const handleSort = (key: L2SortKey) => {
     if (sortKey === key) setSortAsc((v) => !v)
@@ -452,56 +685,88 @@ const L2RepeatPanel = memo(function L2RepeatPanel({ l2Repeat }: { l2Repeat: L2Re
     </th>
   )
 
+  const daysRows = sorted.filter((r) => r.avgDaysToRepeat > 0)
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs uppercase text-slate-400">
+            <SortHeader label="L2" col="l2Tag" />
+            <th className="pb-2 pr-4">L1</th>
+            <SortHeader label="Buyers" col="totalBuyers" />
+            <SortHeader label="Repeaters" col="repeaters" />
+            <SortHeader label="Repeat %" col="repeatRate" />
+            <SortHeader label="Avg orders" col="avgOrdersRepeaters" />
+            <SortHeader label="Days to repeat" col="avgDaysToRepeat" />
+            <SortHeader label="1st AOV" col="avgFirstOrderAOV" />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((row) => (
+            <tr key={row.l2Tag} className="border-t border-slate-100">
+              <td className="py-2 pr-4 font-medium">{row.l2Tag}</td>
+              <td className="py-2 pr-4 text-slate-500">{row.l1}</td>
+              <td className="py-2 pr-4 text-right tabular-nums">{row.totalBuyers.toLocaleString('en-IN')}</td>
+              <td className="py-2 pr-4 text-right tabular-nums">{row.repeaters.toLocaleString('en-IN')}</td>
+              <td className="py-2 pr-4 text-right tabular-nums font-medium">{row.repeatRate.toFixed(1)}%</td>
+              <td className="py-2 pr-4 text-right tabular-nums">{row.avgOrdersRepeaters.toFixed(1)}</td>
+              <td className="py-2 pr-4 text-right tabular-nums">
+                {row.avgDaysToRepeat > 0 ? row.avgDaysToRepeat.toFixed(1) : '—'}
+              </td>
+              <td className="py-2 text-right tabular-nums">{formatINR(row.avgFirstOrderAOV)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <TableSummaryFooter
+          cells={[
+            { type: 'text', values: [] },
+            { type: 'text', values: [] },
+            { type: 'count', values: sorted.map((r) => r.totalBuyers) },
+            { type: 'count', values: sorted.map((r) => r.repeaters) },
+            { type: 'percentage', values: sorted.map((r) => r.repeatRate) },
+            { type: 'orders', values: sorted.map((r) => r.avgOrdersRepeaters) },
+            { type: 'days', values: daysRows.map((r) => r.avgDaysToRepeat) },
+            { type: 'aov', values: sorted.map((r) => r.avgFirstOrderAOV) },
+          ]}
+        />
+      </table>
+    </div>
+  )
+})
+
+const L2RepeatPanel = memo(function L2RepeatPanel({
+  orders,
+  productTagsMap,
+}: {
+  orders: Order[]
+  productTagsMap: ProductTagsMap
+}) {
   return (
     <div className="space-y-6">
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">Top 20 L2 categories by repeat rate</h3>
-        <ResponsiveContainer width="100%" height={Math.max(320, chartData.length * 28)}>
-          <BarChart data={chartData} layout="vertical" margin={{ left: 80 }}>
-            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-            <XAxis type="number" unit="%" tick={{ fontSize: 10 }} />
-            <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={75} />
-            <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
-            <Bar dataKey="repeatRate" fill="#00A86B" radius={[0, 4, 4, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      <BoardSection
+        title="Top 20 L2 categories by repeat rate"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="90d"
+      >
+        {(boardOrders) => {
+          const l2Repeat = computeL2RepeatRates(boardOrders, productTagsMap)
+          return <L2RepeatBarChart l2Repeat={l2Repeat} />
+        }}
+      </BoardSection>
 
-      <div className="rounded-card border border-kiddo-border bg-white p-5">
-        <h3 className="mb-4 text-sm font-semibold">L2 repeat patterns</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase text-slate-400">
-                <SortHeader label="L2" col="l2Tag" />
-                <th className="pb-2 pr-4">L1</th>
-                <SortHeader label="Buyers" col="totalBuyers" />
-                <SortHeader label="Repeaters" col="repeaters" />
-                <SortHeader label="Repeat %" col="repeatRate" />
-                <SortHeader label="Avg orders" col="avgOrdersRepeaters" />
-                <SortHeader label="Days to repeat" col="avgDaysToRepeat" />
-                <SortHeader label="1st AOV" col="avgFirstOrderAOV" />
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((row) => (
-                <tr key={row.l2Tag} className="border-t border-slate-100">
-                  <td className="py-2 pr-4 font-medium">{row.l2Tag}</td>
-                  <td className="py-2 pr-4 text-slate-500">{row.l1}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.totalBuyers.toLocaleString('en-IN')}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.repeaters.toLocaleString('en-IN')}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums font-medium">{row.repeatRate.toFixed(1)}%</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">{row.avgOrdersRepeaters.toFixed(1)}</td>
-                  <td className="py-2 pr-4 text-right tabular-nums">
-                    {row.avgDaysToRepeat > 0 ? row.avgDaysToRepeat.toFixed(1) : '—'}
-                  </td>
-                  <td className="py-2 text-right tabular-nums">{formatINR(row.avgFirstOrderAOV)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <BoardSection
+        title="L2 repeat patterns"
+        orders={orders}
+        enableBoardDateFilter
+        defaultBoardPreset="90d"
+      >
+        {(boardOrders) => {
+          const l2Repeat = computeL2RepeatRates(boardOrders, productTagsMap)
+          return <L2RepeatPatternsTable l2Repeat={l2Repeat} />
+        }}
+      </BoardSection>
     </div>
   )
 })
@@ -516,89 +781,69 @@ const StatCard = memo(function StatCard({ label, value }: { label: string; value
 })
 
 function RetentionTabInner({ orders, productTagsMap }: RetentionTabProps) {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('Monthly Frequency')
-
-  const { data: bundle, loading } = useWorkerQuery<RetentionBundleResult>(
-    'RETENTION_BUNDLE',
-    'RETENTION_BUNDLE_RESULT',
-    { orders, productTagsMap },
-    orders.length > 0
-  )
-
-  const { latestMonthDistribution, latestMonthLabel } = useMemo(() => {
-    if (orders.length === 0) return { latestMonthDistribution: [], latestMonthLabel: '' }
-
-    const byMonth = new Map<string, Order[]>()
-    for (const order of orders) {
-      const month = format(toZonedTime(new Date(order.created_at), IST), 'yyyy-MM')
-      const list = byMonth.get(month) ?? []
-      list.push(order)
-      byMonth.set(month, list)
-    }
-
-    const months = Array.from(byMonth.keys()).sort()
-    const latestMonth = months[months.length - 1]
-    if (!latestMonth) return { latestMonthDistribution: [], latestMonthLabel: '' }
-
-    const monthOrders = byMonth.get(latestMonth)!
-    const customerCounts = new Map<string | number, number>()
-    for (const o of monthOrders) {
-      const id = o.customer?.id
-      if (!id) continue
-      customerCounts.set(id, (customerCounts.get(id) ?? 0) + 1)
-    }
-
-    const buckets = ['1', '2', '3', '4', '5+'] as const
-    const distribution = buckets.map((orderCount) => {
-      let customers = 0
-      for (const count of customerCounts.values()) {
-        if (orderCount === '5+' && count >= 5) customers++
-        else if (orderCount === String(count)) customers++
-      }
-      return { orderCount, customers }
-    })
-
-    const label = format(toZonedTime(new Date(`${latestMonth}-01`), IST), 'MMM yyyy')
-    return { latestMonthDistribution: distribution, latestMonthLabel: label }
-  }, [orders])
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>('First Order Signals')
 
   if (orders.length === 0) {
     return <EmptyState message="No orders in the selected range for retention analysis." />
   }
 
-  if (loading && !bundle) {
+  if (activeSubTab === 'First Order Signals') {
     return (
-      <div className="rounded-card border border-kiddo-border bg-white px-6 py-12 text-center text-sm text-slate-500">
-        Computing retention metrics…
+      <div className="space-y-6">
+        <SubTabBar tabs={SUB_TABS} active={activeSubTab} onChange={(t) => setActiveSubTab(t as SubTab)} />
+        <FirstOrderSignalsPanel orders={orders} productTagsMap={productTagsMap} />
       </div>
     )
   }
 
-  if (!bundle) {
-    return <EmptyState message="Not enough customer history for retention analysis." />
+  if (activeSubTab === 'Churn Risk') {
+    return (
+      <div className="space-y-6">
+        <SubTabBar tabs={SUB_TABS} active={activeSubTab} onChange={(t) => setActiveSubTab(t as SubTab)} />
+        <ChurnRiskPanel orders={orders} productTagsMap={productTagsMap} />
+      </div>
+    )
+  }
+
+  if (activeSubTab === 'Intervention Timing') {
+    return (
+      <div className="space-y-6">
+        <SubTabBar tabs={SUB_TABS} active={activeSubTab} onChange={(t) => setActiveSubTab(t as SubTab)} />
+        <InterventionTimingPanel orders={orders} productTagsMap={productTagsMap} />
+      </div>
+    )
+  }
+
+  if (activeSubTab === 'LTV Projections') {
+    return (
+      <div className="space-y-6">
+        <SubTabBar tabs={SUB_TABS} active={activeSubTab} onChange={(t) => setActiveSubTab(t as SubTab)} />
+        <LtvProjectionsPanel orders={orders} productTagsMap={productTagsMap} />
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6">
       <SubTabBar tabs={SUB_TABS} active={activeSubTab} onChange={(t) => setActiveSubTab(t as SubTab)} />
 
-      {activeSubTab === 'Monthly Frequency' && (
-        <MonthlyFrequencyPanel
-          monthlyFrequency={bundle.monthlyFrequency}
-          latestMonthDistribution={latestMonthDistribution}
-          latestMonthLabel={latestMonthLabel}
-        />
+      {activeSubTab === 'Monthly Frequency' && <MonthlyFrequencyPanel orders={orders} />}
+
+      {activeSubTab === 'Repeat Rate Funnel' && (
+        <RepeatFunnelPanel orders={orders} productTagsMap={productTagsMap} />
       )}
 
-      {activeSubTab === 'Repeat Rate Funnel' && <RepeatFunnelPanel funnel={bundle.funnel} />}
-
-      {activeSubTab === 'Power Users' && <PowerUsersPanel dailyPower={bundle.dailyPower} />}
+      {activeSubTab === 'Power Users' && (
+        <PowerUsersPanel orders={orders} productTagsMap={productTagsMap} />
+      )}
 
       {activeSubTab === 'Order Count Cohorts' && (
-        <OrderCountCohortsPanel orderCountCohorts={bundle.orderCountCohorts} />
+        <OrderCountCohortsPanel orders={orders} productTagsMap={productTagsMap} />
       )}
 
-      {activeSubTab === 'L2 Repeat Patterns' && <L2RepeatPanel l2Repeat={bundle.l2Repeat} />}
+      {activeSubTab === 'L2 Repeat Patterns' && (
+        <L2RepeatPanel orders={orders} productTagsMap={productTagsMap} />
+      )}
     </div>
   )
 }

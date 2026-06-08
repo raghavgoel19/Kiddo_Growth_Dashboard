@@ -3,7 +3,7 @@ import { getOrderChannel } from './channel'
 import { getDistanceBand, getDistanceKm } from './geography'
 import { getOrderItemCount } from './aggregators'
 import { classifyOrder, isEssential } from './taxonomy'
-import { parseMoney, maskPhone } from './formatters'
+import { parseMoney, displayPhone } from './formatters'
 import { formatIST } from './formatters'
 import { getPowerUserTier } from './aggregators'
 
@@ -78,7 +78,7 @@ export function orderToExportRow(order: Order, allOrders: Order[], productTagsMa
   return {
     order_number: order.name ?? order.order_number ?? order.id,
     date_ist: formatIST(order.created_at),
-    masked_phone: maskPhone(order.customer?.phone),
+    phone: displayPhone(order.customer?.phone),
     customer_order_number: getCustomerOrderNumber(order, allOrders),
     items_count: getOrderItemCount(order),
     total_inr: parseMoney(order.total_price),
@@ -113,7 +113,7 @@ export function customerToExportRow(customer: import('../api/types').Customer, o
     (customerOrders.filter((o) => getDistanceKm(o) != null).length || 1)
 
   return {
-    masked_phone: maskPhone(customer.phone),
+    phone: displayPhone(customer.phone),
     total_orders: customer.orders_count,
     total_spent_inr: spent,
     aov_inr: customer.orders_count > 0 ? spent / customer.orders_count : 0,
@@ -138,7 +138,7 @@ export function exportOrdersCsv(orders: Order[], allOrders: Order[], productTags
     return [
       r.order_number,
       r.date_ist,
-      r.masked_phone,
+      r.phone,
       r.customer_order_number,
       r.items_count,
       r.total_inr,
@@ -155,7 +155,7 @@ export function exportOrdersCsv(orders: Order[], allOrders: Order[], productTags
     [
       'order_number',
       'date_ist',
-      'masked_phone',
+      'phone',
       'customer_order_number',
       'items_count',
       'total_inr',
@@ -179,7 +179,7 @@ export function exportCustomersCsv(
   const rows = customers.map((c) => {
     const r = customerToExportRow(c, orders, productTagsMap)
     return [
-      r.masked_phone,
+      r.phone,
       r.total_orders,
       r.total_spent_inr,
       r.aov_inr,
@@ -195,7 +195,7 @@ export function exportCustomersCsv(
   downloadCsv(
     exportFilename(type),
     [
-      'masked_phone',
+      'phone',
       'total_orders',
       'total_spent_inr',
       'aov_inr',

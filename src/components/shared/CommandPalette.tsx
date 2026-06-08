@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Order } from '../../api/types'
+import { displayPhone } from '../../utils/formatters'
 import { Modal } from './Modal'
 
 interface CommandPaletteProps {
@@ -37,7 +38,7 @@ export function CommandPalette({ orders, onSelectOrder, onNavigate }: CommandPal
       .map((s) => ({ type: 'section' as const, id: s, label: `Go to ${s}` }))
     return [
       ...orderMatches.map((o) => ({ type: 'order' as const, order: o, label: o.name ?? `#${o.order_number}` })),
-      ...phoneMatches.map((o) => ({ type: 'phone' as const, order: o, label: mask(o.customer?.phone) })),
+      ...phoneMatches.map((o) => ({ type: 'phone' as const, order: o, label: displayPhone(o.customer?.phone) })),
       ...sections,
     ].slice(0, 12)
   }, [query, orders])
@@ -80,8 +81,3 @@ export function CommandPalette({ orders, onSelectOrder, onNavigate }: CommandPal
   )
 }
 
-function mask(phone?: string | null) {
-  if (!phone) return 'Guest'
-  const d = phone.replace(/\D/g, '')
-  return `+91 ****${d.slice(-4)}`
-}

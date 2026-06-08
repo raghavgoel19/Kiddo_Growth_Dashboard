@@ -4,6 +4,7 @@ import type { FullDateRange, OrderStatus } from '../api/types'
 import { filterOrdersByCustomRange, formatCustomRangeLabel } from '../utils/dates'
 import { defaultFilters, setFiltersDebounced, useDashboardStore } from '../store'
 import { useFilterWorker } from '../hooks/useComputeWorker'
+import { useCustomerSummariesSync } from '../hooks/useCustomerSummariesSync'
 
 export type CompareMode = 'previous' | 'lastYear' | 'custom' | null
 export type DateMode = 'preset' | 'custom'
@@ -90,6 +91,7 @@ export function DashboardProvider({
   }, [productTagsMap, setProductTagsMap])
 
   useFilterWorker()
+  useCustomerSummariesSync()
 
   const [kpiOverrides, setKpiOverridesState] = useState<Record<string, FullDateRange>>({})
   const [drillDown, setDrillDown] = useState<DrillDownState | null>(null)

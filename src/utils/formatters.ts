@@ -6,15 +6,17 @@ export function formatINR(value: number): string {
   }).format(value)
 }
 
-export function maskPhone(phone: string | undefined | null): string {
+export function displayPhone(phone: string | null | undefined): string {
   if (!phone) return 'Guest'
   const digits = phone.replace(/\D/g, '')
-  if (digits.length < 4) return 'Guest'
-  return `+91 ****${digits.slice(-4)}`
+  if (digits.length === 10) return `+91 ${digits}`
+  if (digits.length === 12 && digits.startsWith('91')) return `+91 ${digits.slice(2)}`
+  if (digits.length === 13 && digits.startsWith('091')) return `+91 ${digits.slice(3)}`
+  return phone
 }
 
 export function guestDisplayName(order: { id: string; customer?: { phone?: string | null } | null }): string {
-  if (order.customer?.phone) return maskPhone(order.customer.phone)
+  if (order.customer?.phone) return displayPhone(order.customer.phone)
   const suffix = order.id.replace(/\D/g, '').slice(-4) || order.id.slice(-4)
   return `Guest #${suffix}`
 }

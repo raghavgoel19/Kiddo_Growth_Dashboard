@@ -5,6 +5,8 @@ import { getOrderChannel } from './channel'
 import { getDistanceBand } from './geography'
 import { parseMoney } from './formatters'
 import { classifyOrder, classifyOrderPrimary } from './taxonomy'
+import { computeFirstOrderDNA, type FirstOrderDNA } from './firstOrderDNA'
+import { computeRepeatProbability, type RepeatProbabilityResult } from './repeatProbability'
 import { IST } from './dates'
 
 export interface CustomerSummary {
@@ -22,6 +24,8 @@ export interface CustomerSummary {
   isPowerUser: boolean
   daysToSecondOrder: number | null
   orders: Order[]
+  firstOrderDNA: FirstOrderDNA
+  repeatProbability: RepeatProbabilityResult | null
 }
 
 export function getOrderL1Categories(order: Order, productTagsMap: ProductTagsMap): string[] {
@@ -76,8 +80,9 @@ export function buildCustomerSummaries(
     }
 
     const lastOrderDate = toZonedTime(new Date(lastOrder.created_at), IST)
+    const firstOrderDNA = computeFirstOrderDNA(firstOrder, productTagsMap)
 
-    return {
+    const summary: CustomerSummary = {
       id: cid,
       phone: firstOrder.customer?.phone ?? null,
       totalOrders: sorted.length,
@@ -92,7 +97,15 @@ export function buildCustomerSummaries(
       isPowerUser,
       daysToSecondOrder,
       orders: sorted,
+      firstOrderDNA,
+      repeatProbability: null,
     }
+
+    if (sorted.length === 1) {
+      summary.repeatProbability = computeRepeatProbability(summary, firstOrderDNA, [])
+    }
+
+    return summary
   })
 }
 

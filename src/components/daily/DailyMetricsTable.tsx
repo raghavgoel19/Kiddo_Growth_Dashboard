@@ -10,6 +10,7 @@ import {
 import { METRIC_DEFINITIONS } from '../../utils/metricDefinitions'
 import { InfoTooltip } from '../shared/InfoTooltip'
 import { ExportButton } from '../shared/ExportButton'
+import { TableSummaryFooter } from '../shared/TableSummaryFooter'
 import { useDashboardContext, useDrillDown } from '../../context/DashboardContext'
 import { exportFilename, downloadCsv } from '../../utils/csv'
 import { filterOrdersForMetric } from '../../utils/drillDownFilters'
@@ -19,6 +20,7 @@ import { IST, toIST } from '../../utils/dates'
 interface DailyMetricsTableProps {
   orders: Order[]
   productTagsMap: ProductTagsMap
+  embedded?: boolean
 }
 
 const METRIC_DRILL_MAP: Record<string, string> = {
@@ -32,7 +34,7 @@ function dayKey(date: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: IST }).format(date)
 }
 
-export function DailyMetricsTable({ orders, productTagsMap }: DailyMetricsTableProps) {
+export function DailyMetricsTable({ orders, productTagsMap, embedded = false }: DailyMetricsTableProps) {
   const { openDrillDown } = useDrillDown()
   const { allOrders } = useDashboardContext()
   const tableData = useMemo(
@@ -86,14 +88,21 @@ export function DailyMetricsTable({ orders, productTagsMap }: DailyMetricsTableP
   }
 
   return (
-    <div className="rounded-card border border-kiddo-border bg-white">
-      <div className="flex items-center justify-between border-b border-kiddo-border px-4 py-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">Daily metrics comparison</h3>
-          <p className="text-xs text-slate-500">Last 8 days · IST · Today through current time</p>
+    <div className={embedded ? '' : 'rounded-card border border-kiddo-border bg-white'}>
+      {!embedded && (
+        <div className="flex items-center justify-between border-b border-kiddo-border px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Daily metrics comparison</h3>
+            <p className="text-xs text-slate-500">Last 8 days · IST · Today through current time</p>
+          </div>
+          <ExportButton onExport={exportTable} />
         </div>
-        <ExportButton onExport={exportTable} />
-      </div>
+      )}
+      {embedded && (
+        <div className="mb-3 flex justify-end">
+          <ExportButton onExport={exportTable} />
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="min-w-[900px] w-full text-sm">
           <thead>
@@ -192,6 +201,17 @@ export function DailyMetricsTable({ orders, productTagsMap }: DailyMetricsTableP
               )
             })}
           </tbody>
+          <TableSummaryFooter
+            firstCellLabel="Period totals"
+            cells={[
+              { type: 'text', values: [], label: 'Period totals' },
+              ...dayMetrics.map((d) => ({
+                type: 'count' as const,
+                values: [d.totalOrders ?? 0],
+                label: `${(d.totalOrders ?? 0).toLocaleString('en-IN')} orders`,
+              })),
+            ]}
+          />
         </table>
       </div>
     </div>

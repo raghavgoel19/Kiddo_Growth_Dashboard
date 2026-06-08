@@ -1,5 +1,6 @@
+import { endOfDay } from 'date-fns'
 import type { Order } from '../api/types'
-import { getMeta, replaceOrders, setMeta } from '../db/orderDB'
+import { bulkSaveOrders, getAllOrders, getMeta, setMeta } from '../db/orderDB'
 import { fetchOrdersPage } from './fetchPages'
 import type { ApiDateRange } from '../utils/rangeParams'
 
@@ -38,6 +39,103 @@ async function writeRangeCache(range: ApiDateRange, count: number) {
   await setMeta('activeRangeKey', range.cacheKey)
 }
 
+export async function fetchOrdersSince(since: string, until?: string): Promise<Order[]> {
+  const allNew: Order[] = []
+  let cursor: string | null = null
+  let hasNextPage = true
+  const untilIso = until ?? endOfDay(new Date()).toISOString()
+
+  while (hasNextPage) {
+    const result = await fetchOrdersPage(since, untilIso, cursor)
+    allNew.push(...result.orders)
+    hasNextPage = result.pageInfo.hasNextPage
+    cursor = result.pageInfo.nextPageUrl
+  }
+
+  return allNew
+}
+
+/** Load IndexedDB cache immediately, then fetch only orders newer than last sync. */
+export async function startupSync(
+  onStatus: (status: SyncStatus) => void,
+  onOrdersReady: (orders: Order[]) => void
+): Promise<Order[]> {
+  const cached = await getAllOrders()
+
+  if (cached.length > 0) {
+    onStatus({ state: 'loading-cache', count: cached.length })
+    onOrdersReady(cached)
+    console.log(`[Sync] ${cached.length.toLocaleString('en-IN')} orders loaded from cache`)
+  }
+
+  const lastSync = await getMeta('lastSyncedAt')
+  const since = lastSync
+    ? new Date(new Date(lastSync).getTime() - 10 * 60 * 1000).toISOString()
+    : null
+
+  if (!since) {
+    if (cached.length > 0) {
+      onStatus({
+        state: 'done',
+        ordersInDB: cached.length,
+        newOrdersFetched: 0,
+        syncedAt: new Date(),
+        label: `${cached.length.toLocaleString('en-IN')} orders · cached`,
+        fromCache: true,
+      })
+    }
+    return cached
+  }
+
+  onStatus({
+    state: 'syncing',
+    fetched: 0,
+    label: `${cached.length.toLocaleString('en-IN')} orders loaded · Checking for new…`,
+  })
+
+  try {
+    const newOrders = await fetchOrdersSince(since)
+    if (newOrders.length > 0) {
+      await bulkSaveOrders(newOrders)
+      console.log(`[Sync] Merged ${newOrders.length} new orders into IndexedDB`)
+    }
+
+    await setMeta('lastSyncedAt', new Date().toISOString())
+    const all = await getAllOrders()
+    onOrdersReady(all)
+
+    const message =
+      newOrders.length > 0
+        ? `${all.length.toLocaleString('en-IN')} orders · ${newOrders.length} new`
+        : `${all.length.toLocaleString('en-IN')} orders · Up to date`
+
+    onStatus({
+      state: 'done',
+      ordersInDB: all.length,
+      newOrdersFetched: newOrders.length,
+      syncedAt: new Date(),
+      label: message,
+      fromCache: newOrders.length === 0 && cached.length > 0,
+    })
+    return all
+  } catch (err) {
+    console.error('[Sync] Incremental sync failed:', err)
+    onStatus({
+      state: 'error',
+      message: err instanceof Error ? err.message : 'Sync failed',
+      cachedOrdersAvailable: cached.length,
+    })
+    return cached
+  }
+}
+
+export async function incrementalRefresh(
+  onStatus: (status: SyncStatus) => void,
+  onOrdersReady: (orders: Order[]) => void
+): Promise<Order[]> {
+  return startupSync(onStatus, onOrdersReady)
+}
+
 export async function fetchOrdersForRange(
   range: ApiDateRange,
   onStatus: (status: SyncStatus) => void,
@@ -49,26 +147,25 @@ export async function fetchOrdersForRange(
 
   if (!force) {
     const cached = await readRangeCache(range.cacheKey)
+    const { getAllOrders } = await import('../db/orderDB')
+    const existing = await getAllOrders()
     if (
+      existing.length > 0 &&
       cached &&
       activeKey === range.cacheKey &&
       Date.now() - new Date(cached.fetchedAt).getTime() < range.ttlMs
     ) {
-      const { getAllOrders } = await import('../db/orderDB')
-      const orders = await getAllOrders()
-      if (orders.length > 0) {
-        onStatus({
-          state: 'done',
-          ordersInDB: orders.length,
-          newOrdersFetched: 0,
-          syncedAt: new Date(cached.fetchedAt),
-          label: range.label,
-          fromCache: true,
-        })
-        onOrdersReady(orders)
-        console.log(`[Sync] Cache hit for ${range.label}: ${orders.length} orders`)
-        return orders
-      }
+      onStatus({
+        state: 'done',
+        ordersInDB: existing.length,
+        newOrdersFetched: 0,
+        syncedAt: new Date(cached.fetchedAt),
+        label: range.label,
+        fromCache: true,
+      })
+      onOrdersReady(existing)
+      console.log(`[Sync] Cache hit for ${range.label}: ${existing.length} orders`)
+      return existing
     }
   }
 
@@ -91,19 +188,23 @@ export async function fetchOrdersForRange(
       console.log(`[Sync] Page ${pageCount}: +${result.orders.length} (${newOrders.length} total)`)
     }
 
-    await replaceOrders(newOrders)
-    await writeRangeCache(range, newOrders.length)
-    onOrdersReady(newOrders)
+    if (newOrders.length > 0) {
+      await bulkSaveOrders(newOrders)
+    }
+    await setMeta('lastSyncedAt', new Date().toISOString())
+    const all = await getAllOrders()
+    await writeRangeCache(range, all.length)
+    onOrdersReady(all)
     onStatus({
       state: 'done',
-      ordersInDB: newOrders.length,
+      ordersInDB: all.length,
       newOrdersFetched: newOrders.length,
       syncedAt: new Date(),
       label: range.label,
       fromCache: false,
     })
-    console.log(`[Sync] ${range.label}: ${newOrders.length} orders (${pageCount} API pages)`)
-    return newOrders
+    console.log(`[Sync] ${range.label}: merged ${newOrders.length} orders (${pageCount} API pages), ${all.length} total in DB`)
+    return all
   } catch (err) {
     const { getAllOrders } = await import('../db/orderDB')
     const fallback = await getAllOrders()
@@ -126,5 +227,6 @@ export async function fullResync(
   const { clearOrders, deleteMeta } = await import('../db/orderDB')
   await clearOrders()
   await deleteMeta('activeRangeKey')
+  await deleteMeta('lastSyncedAt')
   return fetchOrdersForRange(range, onStatus, onOrdersReady, { force: true })
 }
