@@ -178,6 +178,7 @@ export const RepeatProbabilitySection = memo(function RepeatProbabilitySection({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
     >
       {(boardOrders) => (
         <RepeatProbabilityContent boardOrders={boardOrders} productTagsMap={productTagsMap} />

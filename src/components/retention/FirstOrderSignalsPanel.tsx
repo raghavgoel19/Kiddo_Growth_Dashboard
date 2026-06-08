@@ -366,7 +366,8 @@ export const FirstOrderSignalsPanel = memo(function FirstOrderSignalsPanel({
         title="What in the first order predicts repeat behaviour?"
         orders={orders}
         enableBoardDateFilter
-        defaultBoardPreset="30d"
+        defaultBoardPreset="90d"
+        boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => (
           <CorrelationBoard boardOrders={boardOrders} productTagsMap={productTagsMap} />
@@ -377,7 +378,8 @@ export const FirstOrderSignalsPanel = memo(function FirstOrderSignalsPanel({
         title="Two-dimension segment explorer"
         orders={orders}
         enableBoardDateFilter
-        defaultBoardPreset="30d"
+        defaultBoardPreset="90d"
+        boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => (
           <SegmentHeatmapBoard boardOrders={boardOrders} productTagsMap={productTagsMap} />
@@ -388,7 +390,8 @@ export const FirstOrderSignalsPanel = memo(function FirstOrderSignalsPanel({
         title="L2 gateway analysis"
         orders={orders}
         enableBoardDateFilter
-        defaultBoardPreset="30d"
+        defaultBoardPreset="90d"
+        boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => <L2GatewayBoard boardOrders={boardOrders} productTagsMap={productTagsMap} />}
       </BoardSection>

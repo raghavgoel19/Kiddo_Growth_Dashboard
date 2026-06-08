@@ -36,8 +36,62 @@ export function defaultBoardRange(preset: BoardDatePreset = '30d'): BoardDateRan
   return boardPresetRange(preset)
 }
 
+export type BoardFilterMode = 'order_date' | 'first_order_cohort' | 'customer_activity'
+
 export function filterOrdersByBoardRange(orders: Order[], range: BoardDateRange): Order[] {
   return orders.filter((o) => isInDateRangeIST(o.created_at, range.from, range.to))
+}
+
+/** All orders for customers whose first order falls in the board range (full history for repeat metrics). */
+export function filterOrdersForFirstOrderCohort(orders: Order[], range: BoardDateRange): Order[] {
+  const byCustomer = new Map<string, Order[]>()
+  for (const order of orders) {
+    const cid = order.customer?.id
+    if (!cid) continue
+    const list = byCustomer.get(cid) ?? []
+    list.push(order)
+    byCustomer.set(cid, list)
+  }
+
+  const cohortIds = new Set<string>()
+  for (const [cid, customerOrders] of byCustomer) {
+    const first = customerOrders.reduce((a, b) =>
+      new Date(a.created_at).getTime() < new Date(b.created_at).getTime() ? a : b
+    )
+    if (isInDateRangeIST(first.created_at, range.from, range.to)) {
+      cohortIds.add(cid)
+    }
+  }
+
+  return orders.filter((o) => o.customer?.id && cohortIds.has(o.customer.id))
+}
+
+/** All orders for customers with at least one order in the board range. */
+export function filterOrdersForCustomerActivity(orders: Order[], range: BoardDateRange): Order[] {
+  const activeIds = new Set<string>()
+  for (const order of orders) {
+    const cid = order.customer?.id
+    if (cid && isInDateRangeIST(order.created_at, range.from, range.to)) {
+      activeIds.add(cid)
+    }
+  }
+  return orders.filter((o) => o.customer?.id && activeIds.has(o.customer.id))
+}
+
+export function filterOrdersByBoardMode(
+  orders: Order[],
+  range: BoardDateRange,
+  mode: BoardFilterMode = 'order_date'
+): Order[] {
+  switch (mode) {
+    case 'first_order_cohort':
+      return filterOrdersForFirstOrderCohort(orders, range)
+    case 'customer_activity':
+      return filterOrdersForCustomerActivity(orders, range)
+    case 'order_date':
+    default:
+      return filterOrdersByBoardRange(orders, range)
+  }
 }
 
 export function isBoardPresetActive(range: BoardDateRange, preset: BoardDatePreset): boolean {

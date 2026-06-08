@@ -248,8 +248,9 @@ export const LtvProjectionsPanel = memo(function LtvProjectionsPanel({
       <BoardSection
         title="90-day LTV projections"
         orders={orders}
-        enableBoardDateFilter
-        defaultBoardPreset="30d"
+      enableBoardDateFilter
+      defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => (
           <LtvProjectionsSummary boardOrders={boardOrders} productTagsMap={productTagsMap} />
@@ -259,8 +260,9 @@ export const LtvProjectionsPanel = memo(function LtvProjectionsPanel({
       <BoardSection
         title="Projected GMV by segment"
         orders={orders}
-        enableBoardDateFilter
-        defaultBoardPreset="30d"
+      enableBoardDateFilter
+      defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => (
           <LtvProjectionsChart boardOrders={boardOrders} productTagsMap={productTagsMap} />
@@ -270,8 +272,9 @@ export const LtvProjectionsPanel = memo(function LtvProjectionsPanel({
       <BoardSection
         title="Segment breakdown"
         orders={orders}
-        enableBoardDateFilter
-        defaultBoardPreset="30d"
+      enableBoardDateFilter
+      defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => (
           <LtvProjectionsTable boardOrders={boardOrders} productTagsMap={productTagsMap} />

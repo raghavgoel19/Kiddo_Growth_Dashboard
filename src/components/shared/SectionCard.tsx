@@ -4,7 +4,11 @@ import type { Order } from '../../api/types'
 import { BoardDateFilter } from './BoardDateFilter'
 import { InfoTooltipByKey } from './InfoTooltip'
 import { useBoardDateRange } from '../../hooks/useBoardDateRange'
-import { filterOrdersByBoardRange, type BoardDatePreset } from '../../utils/boardDateRange'
+import {
+  filterOrdersByBoardMode,
+  type BoardDatePreset,
+  type BoardFilterMode,
+} from '../../utils/boardDateRange'
 
 interface SectionCardProps {
   id?: string
@@ -14,6 +18,8 @@ interface SectionCardProps {
   orders?: Order[]
   defaultBoardPreset?: BoardDatePreset
   enableBoardDateFilter?: boolean
+  /** How the board date range is applied. Default `order_date` slices orders by created_at. */
+  boardFilterMode?: BoardFilterMode
   children: ReactNode | ((filteredOrders: Order[]) => ReactNode)
 }
 
@@ -25,13 +31,14 @@ export function SectionCard({
   orders,
   defaultBoardPreset = '30d',
   enableBoardDateFilter = false,
+  boardFilterMode = 'order_date',
   children,
 }: SectionCardProps) {
   const board = useBoardDateRange(defaultBoardPreset)
   const filteredOrders = useMemo(() => {
     if (!enableBoardDateFilter || !orders) return orders ?? []
-    return filterOrdersByBoardRange(orders, board.range)
-  }, [enableBoardDateFilter, orders, board.range])
+    return filterOrdersByBoardMode(orders, board.range, boardFilterMode)
+  }, [enableBoardDateFilter, orders, board.range, boardFilterMode])
 
   const content =
     typeof children === 'function' ? children(filteredOrders ?? []) : children

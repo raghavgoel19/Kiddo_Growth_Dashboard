@@ -359,6 +359,7 @@ const RepeatFunnelPanel = memo(function RepeatFunnelPanel({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
     >
       {(boardOrders) => <RepeatFunnelContent boardOrders={boardOrders} productTagsMap={productTagsMap} />}
     </BoardSection>
@@ -628,6 +629,7 @@ const OrderCountCohortsPanel = memo(function OrderCountCohortsPanel({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
     >
       {(boardOrders) => (
         <OrderCountCohortsContent boardOrders={boardOrders} productTagsMap={productTagsMap} />
@@ -749,6 +751,7 @@ const L2RepeatPanel = memo(function L2RepeatPanel({
         orders={orders}
         enableBoardDateFilter
         defaultBoardPreset="90d"
+        boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => {
           const l2Repeat = computeL2RepeatRates(boardOrders, productTagsMap)
@@ -761,6 +764,7 @@ const L2RepeatPanel = memo(function L2RepeatPanel({
         orders={orders}
         enableBoardDateFilter
         defaultBoardPreset="90d"
+        boardFilterMode="first_order_cohort"
       >
         {(boardOrders) => {
           const l2Repeat = computeL2RepeatRates(boardOrders, productTagsMap)

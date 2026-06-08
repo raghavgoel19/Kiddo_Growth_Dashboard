@@ -139,6 +139,7 @@ export const OrderJourneySection = memo(function OrderJourneySection({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
     >
       {(boardOrders) => (
         <OrderJourneyContent boardOrders={boardOrders} productTagsMap={productTagsMap} />

@@ -25,6 +25,7 @@ import { parseMoney, formatINR } from '../../utils/formatters'
 import { EmptyState } from '../shared/EmptyState'
 import { SectionCard } from '../shared/SectionCard'
 import { useChartDrillDown } from '../../hooks/useChartDrillDown'
+import { filterOrdersForMetric } from '../../utils/drillDownFilters'
 
 interface TabProps {
   orders: Order[]
@@ -143,6 +144,7 @@ function EssentialSplitChart({ orders, productTagsMap }: { orders: Order[]; prod
 }
 
 function L1CategoryChart({ orders, productTagsMap }: { orders: Order[]; productTagsMap: ProductTagsMap }) {
+  const { drillFromChart } = useChartDrillDown()
   const categoryBars = useMemo(() => {
     const map = new Map<string, { orders: number; gmv: number }>()
     for (const order of orders) {
@@ -177,7 +179,22 @@ function L1CategoryChart({ orders, productTagsMap }: { orders: Order[]; productT
           <YAxis yAxisId="left" />
           <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
           <Tooltip />
-          <Bar yAxisId="left" dataKey="orders" fill="#00A86B" name="Orders" />
+          <Bar
+            yAxisId="left"
+            dataKey="orders"
+            fill="#00A86B"
+            name="Orders"
+            className="cursor-pointer"
+            onClick={(data) => {
+              const cat = String((data as { category?: string }).category ?? '')
+              if (!cat) return
+              drillFromChart({
+                title: cat,
+                subtitle: 'L1 category orders',
+                orders: filterOrdersForMetric(orders, productTagsMap, { category: cat }),
+              })
+            }}
+          />
           <Bar yAxisId="right" dataKey="gmv" fill="#cbd5e1" name="GMV" />
         </BarChart>
       </ResponsiveContainer>

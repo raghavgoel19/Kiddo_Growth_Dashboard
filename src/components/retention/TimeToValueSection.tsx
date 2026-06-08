@@ -166,6 +166,7 @@ export const TimeToValueSection = memo(function TimeToValueSection({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="first_order_cohort"
     >
       {(boardOrders) => (
         <TimeToValueContent boardOrders={boardOrders} productTagsMap={productTagsMap} />

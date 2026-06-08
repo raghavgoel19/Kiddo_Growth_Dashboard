@@ -244,10 +244,10 @@ export const UsersTab = memo(function UsersTab({
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <SectionCard title="New customers per day" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        <SectionCard title="New customers per day" orders={orders} enableBoardDateFilter defaultBoardPreset="30d" boardFilterMode="first_order_cohort">
           {(boardOrders) => <UsersNewCustomersChart orders={boardOrders} productTagsMap={productTagsMap} />}
         </SectionCard>
-        <SectionCard title="Cohort size (monthly)" orders={orders} enableBoardDateFilter defaultBoardPreset="30d">
+        <SectionCard title="Cohort size (monthly)" orders={orders} enableBoardDateFilter defaultBoardPreset="30d" boardFilterMode="first_order_cohort">
           {(boardOrders) => <UsersCohortChart orders={boardOrders} productTagsMap={productTagsMap} />}
         </SectionCard>
       </div>
@@ -258,6 +258,7 @@ export const UsersTab = memo(function UsersTab({
         orders={orders}
         enableBoardDateFilter
         defaultBoardPreset="30d"
+        boardFilterMode="customer_activity"
       >
         {(boardOrders) => <UsersPowerUsersTable orders={boardOrders} productTagsMap={productTagsMap} />}
       </SectionCard>

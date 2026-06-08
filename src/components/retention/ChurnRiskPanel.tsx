@@ -204,6 +204,7 @@ export const ChurnRiskPanel = memo(function ChurnRiskPanel({
       orders={orders}
       enableBoardDateFilter
       defaultBoardPreset="30d"
+      boardFilterMode="customer_activity"
     >
       {(boardOrders) => (
         <ChurnRiskFeed boardOrders={boardOrders} productTagsMap={productTagsMap} />
